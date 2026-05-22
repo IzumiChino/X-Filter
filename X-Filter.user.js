@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X-filter
 // @namespace    https://tampermonkey.net/
-// @version      5.0.0
-// @description  内置轻量在线逻辑回归分类器，从用户标注学习"文本特征+账号特征"联合判定垃圾；Jaccard 相似度作为特征之一；结构通道处理 emoji/digits-only；支持标记模式、折叠/隐藏、导入导出；关注免屏蔽
+// @version      5.1.0
+// @description  内置轻量在线逻辑回归分类器，从用户标注学习"文本特征+账号特征"联合判定垃圾；Jaccard 相似度作为特征之一；结构通道处理 emoji/digits-only；加入中文误伤保护与风险词锚点；支持标记模式、折叠/隐藏、导入导出；关注免屏蔽
 // @author       好奇猫a & Izumi Chino
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -48,6 +48,8 @@
     mlLearningRate: 0.05,
     mlL2: 0.001,
     mlMaxTrainData: 500,
+    mlMinPositiveSamples: 3,
+    mlMinNegativeSamples: 3,
 
     debug: false,
   };
@@ -71,7 +73,7 @@
     cfg[k] = GM_getValue(k, DEFAULT[k]);
   }
 
-  const log = (...a) => cfg.debug && console.log("[X ML-Shield v5]", ...a);
+  const log = (...a) => cfg.debug && console.log("[X ML-Shield v5.1]", ...a);
 
   // ============================================================
   //  存储 + 内存缓存
@@ -83,7 +85,7 @@
 
   let memBad = loadArr(KEY_BAD);
   let memGood = loadArr(KEY_GOOD);
-  let memFollowed = loadArr(KEY_FOLLOWED);
+  let memFollowed = new Set(loadArr(KEY_FOLLOWED));
   let memTrain = loadArr(KEY_TRAIN);
   let memHRep = loadObj(KEY_HREP);
 
@@ -102,9 +104,9 @@
 
   function addFollowed(handle) {
     if (!handle || !handle.startsWith("@")) return;
-    if (memFollowed.includes(handle)) return;
-    memFollowed.push(handle);
-    saveArr(KEY_FOLLOWED, memFollowed);
+    if (memFollowed.has(handle)) return;
+    memFollowed.add(handle);
+    saveArr(KEY_FOLLOWED, [...memFollowed]);
     log("learned followed:", handle);
   }
 
@@ -123,12 +125,15 @@
     return e ? e.avg : 0.5;
   }
 
-  function saveTrainExample(features, label, handle, preview) {
+  function saveTrainExample(features, label, rawData) {
     memTrain.unshift({
       f: features.map(v => Math.round(v * 1e4) / 1e4),
       y: label,
-      h: handle || "",
-      t: (preview || "").slice(0, 200),
+      h: rawData.handle || "",
+      txt: (rawData.text || "").slice(0, 500),
+      nm: (rawData.name || "").slice(0, 60),
+      rp: rawData.isReply ? 1 : 0,
+      md: rawData.hasMedia ? 1 : 0,
       ts: Date.now(),
     });
     if (memTrain.length > cfg.mlMaxTrainData) memTrain.length = cfg.mlMaxTrainData;
@@ -183,11 +188,21 @@
 
   function bestSimilarity(grams, samples) {
     let best = 0;
-    const limit = Math.min(samples.length, 180);
-    for (let i = 0; i < limit; i++) {
+    const recentCount = Math.min(samples.length, 120);
+    for (let i = 0; i < recentCount; i++) {
       const sim = jaccard(grams, samples[i].grams);
       if (sim > best) best = sim;
-      if (best >= 0.95) break;
+      if (best >= 0.95) return best;
+    }
+    if (samples.length > recentCount) {
+      const rest = samples.length - recentCount;
+      const sampleCount = Math.min(rest, 60);
+      for (let j = 0; j < sampleCount; j++) {
+        const idx = recentCount + Math.floor(Math.random() * rest);
+        const sim = jaccard(grams, samples[idx].grams);
+        if (sim > best) best = sim;
+        if (best >= 0.95) return best;
+      }
     }
     return best;
   }
@@ -235,10 +250,180 @@
     return total > 0 ? repeated / total : 0;
   }
 
+  function countMatches(str, re) {
+    const m = (str || "").match(re);
+    return m ? m.length : 0;
+  }
+
+  function compactRiskText(str) {
+    return (str || "")
+      .toLowerCase()
+      .replace(/[\s\u3000]+/g, "")
+      .replace(/[，。！？、,.!?:;'""'“”‘’（）()\[\]【】<>《》~`|\\/]/g, "");
+  }
+
+  function textRiskProfile(text) {
+    const raw = text || "";
+    const compact = compactRiskText(raw);
+    const len = raw.length;
+    const cjkCount = countMatches(raw, /[\u4E00-\u9FFF]/gu);
+    const latinCount = countMatches(raw, /[A-Za-z]/g);
+    const digitCount = countDigits(raw);
+    const cjkRatio = len > 0 ? cjkCount / len : 0;
+    const latinRatio = len > 0 ? latinCount / len : 0;
+    const mixedScript = len > 0 && cjkCount > 0 && latinCount > 0
+      ? Math.min(1, 2 * Math.min(cjkRatio, latinRatio))
+      : 0;
+    const cjkDominant = cjkRatio >= 0.45 && latinRatio <= 0.15;
+
+    const hasURL = /https?:\/\/|www\.|t\.me\/|telegram\.me|t\.co|wa\.me|line\.me|bit\.ly|tinyurl\.com/i.test(raw) ? 1 : 0;
+    const contact = /(?:vx|wx|wechat|weixin|tg|telegram|qq|whatsapp|line|私信|私聊|联系我|加v|加vx|加微|加微信|加薇|v信|微\s*信|电报|站内信|dm)/i.test(compact) ? 1 : 0;
+    const sex = /(?:约炮|约啪|约p|包夜|上门服务|外约|裸聊|全套|外围|陪睡|学生妹|成人视频|无码视频|开房|一夜情|同城约|附近妹)/i.test(compact) ? 1 : 0;
+    const fraud = /(?:刷单返利|返利群|提现异常|稳赚|日结兼职|无抵押贷款|刷流水|博彩|杀猪盘|送彩金|代投|开户链接|高收益|带单|资金盘|虚拟币搬砖|usdt搬砖)/i.test(compact) ? 1 : 0;
+    const money = /(?:¥|￥|\$|\d+(?:\.\d+)?(?:w|W|万|k|K|元|块|刀|美元|usdt|USDT))/i.test(raw) ? 1 : 0;
+    const rep = textRepetition(raw);
+
+    const riskScore = Math.min(
+      1,
+      hasURL * 0.20 +
+      contact * 0.30 +
+      sex * 0.35 +
+      fraud * 0.35 +
+      money * 0.10 +
+      (digitCount >= 8 ? 0.10 : 0) +
+      (rep > 0.45 ? 0.10 : 0)
+    );
+
+    return {
+      len,
+      cjkCount,
+      latinCount,
+      digitCount,
+      cjkRatio,
+      latinRatio,
+      mixedScript,
+      cjkDominant,
+      hasURL,
+      contact,
+      sex,
+      fraud,
+      money,
+      rep,
+      riskScore,
+      hasStrongAnchor: riskScore >= 0.35,
+    };
+  }
+
+  function isCjkLowRiskText(risk) {
+    return risk.cjkDominant && !risk.hasStrongAnchor && risk.riskScore < 0.35;
+  }
+
+  function getCjkProtectionLevel(risk, replyMode) {
+    if (!isCjkLowRiskText(risk)) return 0;
+    return replyMode ? 0.18 : 0.12;
+  }
+
+  // ============================================================
+  //  n-gram 哈希特征 (Hashing Trick)
+  // ============================================================
+  function fnv32a(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+
+  function hashNgramFeatures(text, handle, name, risk) {
+    const features = new Float64Array(HASH_DIM);
+    const r = risk || textRiskProfile(text);
+    const parts = [
+      { value: text, weight: r.cjkDominant && !r.hasStrongAnchor ? 0.35 : 1 },
+      { value: handle, weight: 0.9 },
+      { value: name, weight: r.cjkDominant && !r.hasStrongAnchor ? 0.6 : 0.85 },
+    ].filter(part => part.value);
+    for (const part of parts) {
+      const s = normalizeText(part.value);
+      if (s.length < 3) continue;
+      for (let i = 0; i <= s.length - 3; i++) {
+        const gram = s.slice(i, i + 3);
+        const idx = fnv32a(gram) % HASH_DIM;
+        features[idx] = Math.max(features[idx], part.weight);
+      }
+    }
+    let normSq = 0;
+    for (let i = 0; i < HASH_DIM; i++) normSq += features[i] * features[i];
+    if (normSq > 0) {
+      const norm = 1 / Math.sqrt(normSq);
+      for (let i = 0; i < HASH_DIM; i++) if (features[i]) features[i] *= norm;
+    }
+    return features;
+  }
+
+  // ============================================================
+  //  上下文分析（基于 Jaccard n-gram 集合）
+  // ============================================================
+  let threadCtx = { url: null, opGrams: null, blocked: 0, total: 0 };
+  const recentBuf = [];
+  const RECENT_CAP = 30;
+
+  function refreshThreadCtx() {
+    const url = location.pathname;
+    if (url !== threadCtx.url) {
+      threadCtx = { url, opGrams: null, blocked: 0, total: 0 };
+      recentBuf.length = 0;
+    }
+  }
+
+  function trackThreadResult(wasBlocked) {
+    threadCtx.total++;
+    if (wasBlocked) threadCtx.blocked++;
+  }
+
+  function computeContextBoost(text, handle, name) {
+    const fp = [name, handle, text].filter(Boolean).join(" | ");
+    const grams = makeNgrams(fp, cfg.ngramN);
+    if (grams.length < 5) return 0;
+
+    let boost = 0;
+
+    if (inReplyContext()) {
+      if (!threadCtx.opGrams) {
+        threadCtx.opGrams = grams;
+      } else if (threadCtx.opGrams.length >= 5) {
+        const coherence = jaccard(grams, threadCtx.opGrams);
+        if (coherence < 0.03) boost += 0.10;
+        else if (coherence < 0.06) boost += 0.05;
+      }
+
+      if (threadCtx.total >= 5) {
+        const ratio = threadCtx.blocked / threadCtx.total;
+        if (ratio > 0.6) boost += 0.05;
+      }
+    }
+
+    let maxCross = 0;
+    for (const r of recentBuf) {
+      if (r.handle === handle) continue;
+      const sim = jaccard(grams, r.grams);
+      if (sim > maxCross) maxCross = sim;
+    }
+    recentBuf.push({ grams, handle });
+    if (recentBuf.length > RECENT_CAP) recentBuf.shift();
+
+    if (maxCross > 0.70) boost += 0.12;
+    else if (maxCross > 0.50) boost += 0.06;
+
+    return Math.min(boost, 0.20);
+  }
+
   // ============================================================
   //  在线逻辑回归 (Online Logistic Regression)
   // ============================================================
-  const FEATURE_COUNT = 23;
+  const BASE_FEATURE_COUNT = 28;
+  const HASH_DIM = 256;
+  const FEATURE_COUNT = BASE_FEATURE_COUNT + HASH_DIM;
 
   class OnlineLR {
     constructor(nf, lr, l2) {
@@ -261,17 +446,20 @@
       return this.sigmoid(z);
     }
 
-    update(x, y) {
+    update(x, y, weight) {
       const p = this.predict(x);
       const err = y - p;
+      const w = weight || 1;
+      const effectiveLr = this.lr / (1 + this.n * 0.002);
       for (let i = 0; i < this.w.length; i++) {
-        this.w[i] += this.lr * (err * (x[i] || 0) - this.l2 * this.w[i]);
+        const l2 = i === 0 ? 0 : (i >= BASE_FEATURE_COUNT ? this.l2 * 10 : this.l2);
+        this.w[i] += effectiveLr * (w * err * (x[i] || 0) - l2 * this.w[i]);
       }
       this.n++;
     }
 
-    train(x, y, passes) {
-      for (let i = 0; i < (passes || 3); i++) this.update(x, y);
+    train(x, y, passes, weight) {
+      for (let i = 0; i < (passes || 3); i++) this.update(x, y, weight);
     }
 
     getState() {
@@ -287,22 +475,95 @@
     }
   }
 
+  const FEATURE_VERSION = 3;
+
   let model = new OnlineLR(FEATURE_COUNT, cfg.mlLearningRate, cfg.mlL2);
   const savedModel = GM_getValue(KEY_MODEL, null);
-  if (savedModel) model.setState(savedModel);
+  const savedModelCompatible = !!(
+    savedModel &&
+    savedModel.fv === FEATURE_VERSION &&
+    savedModel.fc === FEATURE_COUNT &&
+    Array.isArray(savedModel.w) &&
+    savedModel.w.length === FEATURE_COUNT
+  );
+  if (savedModelCompatible) model.setState(savedModel);
 
   function saveModelState() {
-    GM_setValue(KEY_MODEL, model.getState());
+    const st = model.getState();
+    st.fv = FEATURE_VERSION;
+    st.fc = FEATURE_COUNT;
+    GM_setValue(KEY_MODEL, st);
+  }
+
+  function autoRetrain() {
+    if (!memTrain.length) return;
+    log("特征版本变化，自动重训模型");
+    model = new OnlineLR(FEATURE_COUNT, cfg.mlLearningRate, cfg.mlL2);
+    let posCount = 0;
+    for (const ex of memTrain) if (ex.y === 1) posCount++;
+    const negCount = memTrain.length - posCount;
+    const posW = posCount > 0 ? Math.min(memTrain.length / (2 * posCount), 10) : 1;
+    const negW = negCount > 0 ? Math.min(memTrain.length / (2 * negCount), 10) : 1;
+    for (let epoch = 0; epoch < 5; epoch++) {
+      const shuffled = [...memTrain].sort(() => Math.random() - 0.5);
+      for (const ex of shuffled) {
+        let f = null;
+        const txt = ex.txt !== undefined ? ex.txt : ex.t;
+        if (txt !== undefined) {
+          f = computeFeatures({
+            text: txt, handle: ex.h, name: ex.nm,
+            isReply: !!ex.rp, hasMedia: !!ex.md,
+          });
+        }
+        if (f) model.update(f, ex.y, ex.y === 1 ? posW : negW);
+      }
+    }
+    saveModelState();
+  }
+
+  const needAutoRetrain = !savedModelCompatible;
+
+  function getTrainCounts() {
+    let pos = 0;
+    for (const ex of memTrain) if (ex.y === 1) pos++;
+    return { pos, neg: memTrain.length - pos, total: memTrain.length };
+  }
+
+  function hasEnoughMlTraining() {
+    const c = getTrainCounts();
+    return (
+      c.total >= cfg.mlMinSamples &&
+      c.pos >= cfg.mlMinPositiveSamples &&
+      c.neg >= cfg.mlMinNegativeSamples
+    );
+  }
+
+  function getClassWeight(label) {
+    if (memTrain.length < 4) return 1;
+    let posCount = 0;
+    for (const ex of memTrain) if (ex.y === 1) posCount++;
+    const negCount = memTrain.length - posCount;
+    if (posCount === 0 || negCount === 0) return 1;
+    const raw = label === 1
+      ? memTrain.length / (2 * posCount)
+      : memTrain.length / (2 * negCount);
+    return Math.min(raw, 10);
+  }
+
+  function getTrainPasses() {
+    if (memTrain.length < 20) return 3;
+    if (memTrain.length < 100) return 2;
+    return 1;
   }
 
   // ============================================================
-  //  特征提取  (23 维, 全部归一化到 ~0-1)
+  //  特征提取  (28 维 + hashing trick, 全部归一化到 ~0-1)
   // ============================================================
   //  0  bias               1
   //  1  textLen             log(1+len)/7
   //  2  emojiRatio          emoji/len
   //  3  digitRatio          digits/len
-  //  4  hasCJK              0/1
+  //  4  contentRisk         约炮/诈骗/联系方式/金额/URL 等综合风险
   //  5  hasURL              0/1
   //  6  charDiversity       unique/len
   //  7  repetition          bigram repeat ratio
@@ -321,12 +582,15 @@
   // 20  ffRatio             min(followers/following/10, 1)
   // 21  hasBio              0/1
   // 22  isVerified          0/1
+  // 23  contactSignal       联系方式/私聊/加微信/TG 等
+  // 24  sexualSpamSignal    约炮/色情服务锚点
+  // 25  fraudSignal         诈骗/返利/博彩/贷款等锚点
+  // 26  mixedScript         中英混排比例
+  // 27  strongRiskAnchor    明确风险锚点
 
-  function extractFeatures(article) {
-    const text = getTweetText(article);
-    const handle = getHandle(article);
-    const name = getDisplayName(article);
+  function computeFeatures({ text, handle, name, isReply, hasMedia }) {
     const hClean = (handle || "").replace(/^@/, "");
+    const risk = textRiskProfile(text);
 
     const tLen = (text || "").length;
     const eN = countEmoji(text);
@@ -340,48 +604,93 @@
     const acct = (handle && memAcct[handle]) || {};
     const hasA = acct.followers !== undefined ? 1 : 0;
 
-    return [
-      1,                                                                            //  0
-      Math.log1p(tLen) / 7,                                                         //  1
-      tLen > 0 ? eN / tLen : 0,                                                     //  2
-      tLen > 0 ? dN / tLen : 0,                                                     //  3
-      /[一-鿿぀-ゟ゠-ヿ]/.test(text || "") ? 1 : 0,         //  4
-      /https?:\/\/|t\.co/.test(text || "") ? 1 : 0,                                 //  5
-      tLen > 0 ? new Set(text).size / tLen : 0,                                     //  6
-      textRepetition(text),                                                          //  7
-      hClean.length > 0 ? hClean.replace(/\D/g, "").length / hClean.length : 0,     //  8
-      /\d{4,}$/.test(hClean) ? 1 : 0,                                               //  9
-      charEntropy(hClean) / 4.5,                                                     // 10
-      name ? countEmoji(name) / Math.max(name.length, 1) : 0,                       // 11
-      inReplyContext() ? 1 : 0,                                                      // 12
-      hasMediaInArticle(article) ? 1 : 0,                                            // 13
-      simBad,                                                                        // 14
-      simGood,                                                                       // 15
-      getHandleRep(handle),                                                          // 16
-      hasA,                                                                          // 17
-      hasA ? Math.log1p(acct.followers || 0) / 14 : 0,                              // 18
-      hasA ? Math.log1p(acct.following || 0) / 14 : 0,                              // 19
+    const base = [
+      1,
+      Math.log1p(tLen) / 7,
+      tLen > 0 ? eN / tLen : 0,
+      tLen > 0 ? dN / tLen : 0,
+      risk.riskScore,
+      risk.hasURL,
+      tLen > 0 ? new Set(text).size / tLen : 0,
+      risk.rep,
+      hClean.length > 0 ? hClean.replace(/\D/g, "").length / hClean.length : 0,
+      /\d{4,}$/.test(hClean) ? 1 : 0,
+      charEntropy(hClean) / 4.5,
+      name ? countEmoji(name) / Math.max(name.length, 1) : 0,
+      isReply ? 1 : 0,
+      hasMedia ? 1 : 0,
+      simBad,
+      simGood,
+      getHandleRep(handle),
+      hasA,
+      hasA ? Math.log1p(acct.followers || 0) / 14 : 0,
+      hasA ? Math.log1p(acct.following || 0) / 14 : 0,
       hasA && (acct.following || 0) > 0
-        ? Math.min((acct.followers || 0) / acct.following / 10, 1) : 0,             // 20
-      hasA && acct.bio ? 1 : 0,                                                     // 21
-      hasA && acct.verified ? 1 : 0,                                                // 22
+        ? Math.min((acct.followers || 0) / acct.following / 10, 1) : 0,
+      hasA && acct.bio ? 1 : 0,
+      hasA && acct.verified ? 1 : 0,
+      risk.contact,
+      risk.sex,
+      risk.fraud,
+      risk.mixedScript,
+      risk.hasStrongAnchor ? 1 : 0,
     ];
+
+    const hashed = hashNgramFeatures(text, handle, name, risk);
+    for (let i = 0; i < HASH_DIM; i++) base.push(hashed[i]);
+    return base;
   }
+
+  function extractFeatures(article) {
+    return computeFeatures({
+      text: getTweetText(article),
+      handle: getHandle(article),
+      name: getDisplayName(article),
+      isReply: inReplyContext(),
+      hasMedia: hasMediaInArticle(article),
+    });
+  }
+
+  if (needAutoRetrain && memTrain.length) autoRetrain();
 
   // ============================================================
   //  重新训练（从存储的训练数据）
   // ============================================================
-  function retrainModel() {
-    if (!memTrain.length) { alert("没有训练数据。"); return; }
+  function retrainModel(silent = false) {
+    if (!memTrain.length) {
+      if (!silent) alert("没有训练数据。");
+      return;
+    }
     model = new OnlineLR(FEATURE_COUNT, cfg.mlLearningRate, cfg.mlL2);
+
+    let posCount = 0;
+    for (const ex of memTrain) if (ex.y === 1) posCount++;
+    const negCount = memTrain.length - posCount;
+    const posW = posCount > 0 ? Math.min(memTrain.length / (2 * posCount), 10) : 1;
+    const negW = negCount > 0 ? Math.min(memTrain.length / (2 * negCount), 10) : 1;
+
     for (let epoch = 0; epoch < 5; epoch++) {
       const shuffled = [...memTrain].sort(() => Math.random() - 0.5);
       for (const ex of shuffled) {
-        if (ex.f && ex.f.length === FEATURE_COUNT) model.update(ex.f, ex.y);
+        const txt = ex.txt !== undefined ? ex.txt : ex.t;
+        if (txt === undefined) continue;
+        const f = computeFeatures({
+          text: txt, handle: ex.h, name: ex.nm,
+          isReply: !!ex.rp, hasMedia: !!ex.md,
+        });
+        model.update(f, ex.y, ex.y === 1 ? posW : negW);
       }
     }
     saveModelState();
-    alert(`重新训练完成。样本 ${memTrain.length}，轮次 5。`);
+    if (!silent) alert(`重新训练完成。样本 ${memTrain.length}（垃圾 ${posCount} / 正常 ${negCount}），轮次 5。`);
+  }
+
+  function learnFromLabel(features, label, rawData) {
+    if (!features || !cfg.mlEnabled) return;
+    saveTrainExample(features, label, rawData);
+    updateHandleRep(rawData.handle, label);
+    if (hasEnoughMlTraining()) retrainModel(true);
+    else saveModelState();
   }
 
   // ============================================================
@@ -396,7 +705,7 @@
       config: {},
       samplesBad: memBad,
       samplesGood: memGood,
-      followedHandles: memFollowed,
+      followedHandles: [...memFollowed],
       trainData: memTrain,
       modelState: model.getState(),
       accountCache: memAcct,
@@ -452,7 +761,7 @@
     for (const [k, v] of Object.entries(incoming || {})) {
       if (!v || !Array.isArray(v.labels)) continue;
       if (!out[k]) { out[k] = v; continue; }
-      const combined = [...new Set([...out[k].labels, ...v.labels])];
+      const combined = [...out[k].labels, ...v.labels];
       if (combined.length > 20) combined.splice(0, combined.length - 20);
       out[k] = { labels: combined, avg: combined.reduce((a, b) => a + b, 0) / combined.length };
     }
@@ -479,26 +788,26 @@
 
     memBad = mergeSamples(memBad, data.samplesBad || [], cfg.maxBadSamples);
     memGood = mergeSamples(memGood, data.samplesGood || [], cfg.maxGoodSamples);
-    memFollowed = mergeStrings(memFollowed, data.followedHandles, 8000);
+    memFollowed = new Set(mergeStrings([...memFollowed], data.followedHandles, 8000));
     memTrain = mergeTrainData(memTrain, data.trainData, cfg.mlMaxTrainData);
     memHRep = mergeHandleRep(memHRep, data.handleReputation);
     memAcct = mergeAccountCache(memAcct, data.accountCache);
 
     saveArr(KEY_BAD, memBad);
     saveArr(KEY_GOOD, memGood);
-    saveArr(KEY_FOLLOWED, memFollowed);
+    saveArr(KEY_FOLLOWED, [...memFollowed]);
     saveArr(KEY_TRAIN, memTrain);
     saveObj(KEY_HREP, memHRep);
     GM_setValue(KEY_ACCT, memAcct);
 
-    if (data.trainData && data.trainData.length && data.featureCount === FEATURE_COUNT) {
+    if (data.trainData && data.trainData.length) {
       retrainModel();
     }
 
     alert(
       `导入完成（已合并去重）：\n` +
       `垃圾样本：${memBad.length}\n正常样本：${memGood.length}\n` +
-      `ML 训练数据：${memTrain.length}\n已关注缓存：${memFollowed.length}\n` +
+      `ML 训练数据：${memTrain.length}\n已关注缓存：${memFollowed.size}\n` +
       `刷新页面后生效。`
     );
   }
@@ -516,7 +825,7 @@
 
   function clearFollowed() {
     if (!confirm("确认清空已关注缓存？")) return;
-    memFollowed = [];
+    memFollowed = new Set();
     saveArr(KEY_FOLLOWED, []);
     alert("已清空已关注缓存。");
   }
@@ -643,7 +952,7 @@
   //  结构通道：emoji-only / digits-only / mixed
   // ============================================================
   function countEmoji(str) {
-    const m = (str || "").match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu);
+    const m = (str || "").match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2B05}-\u{2B55}]/gu);
     return m ? m.length : 0;
   }
 
@@ -652,14 +961,14 @@
   }
 
   function hasAlphaOrCJK(str) {
-    return /[a-zA-Z一-鿿]/.test(str || "");
+    return /[a-zA-Z一-鿿぀-ゟ゠-ヿ가-힯]/.test(str || "");
   }
 
   function isEmojiOnly(str) {
     const t = (str || "").trim();
     if (!t || hasAlphaOrCJK(t) || /\d/.test(t)) return false;
     if (countEmoji(t) <= 0) return false;
-    const stripped = t.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "");
+    const stripped = t.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2B05}-\u{2B55}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}]/gu, "");
     return /^[\s~`!@#$%^&*()_+\-=\[\]{};:'",.<>/?\\|。！？、，·…（）【】]*$/u.test(stripped);
   }
 
@@ -674,7 +983,7 @@
     const t = (str || "").trim();
     if (!t || hasAlphaOrCJK(t)) return false;
     const stripped = t.replace(/[\s~`!@#$%^&*()_+\-=\[\]{};:'",.<>/?\\|。！？、，·…（）【】]/gu, "");
-    return /^[\d\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]+$/u.test(stripped);
+    return /^[\d\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2B05}-\u{2B55}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}]+$/u.test(stripped);
   }
 
   function structuralDecision(text) {
@@ -737,6 +1046,17 @@
 
     // --- 内容维度 ---
     const tLen = (text || "").length;
+    const risk = textRiskProfile(text);
+
+    if (risk.contact && (risk.sex || risk.fraud || risk.money || risk.hasURL)) {
+      score += 0.30; parts.push("联系方式+风险内容");
+    } else if (risk.sex && (risk.money || risk.hasURL)) {
+      score += 0.25; parts.push("色情服务锚点");
+    } else if (risk.fraud && (risk.contact || risk.money || risk.hasURL)) {
+      score += 0.25; parts.push("诈骗/返利锚点");
+    } else if (risk.riskScore >= 0.45) {
+      score += 0.15; parts.push("内容风险词");
+    }
 
     if (tLen > 0 && tLen < 5) {
       score += 0.15; parts.push("超短回复");
@@ -900,14 +1220,14 @@
     const card = document.createElement("div");
     card.className = "xls-card";
 
-    const metaLabel = where === "ml"
-      ? `ML ${sim.toFixed(2)} (${model.n}例)`
-      : `sim ${sim.toFixed(2)} (${where})`;
+    const channelMap = { struct: "结构", heuristic: "启发式", ml: "ML", reply: "Jaccard", timeline: "Jaccard", manual: "手动" };
+    const channelLabel = channelMap[where] || where;
+    const scoreLabel = sim != null ? sim.toFixed(2) : "—";
 
     card.innerHTML = `
       <div class="xls-row">
         <div class="xls-title">已屏蔽：疑似垃圾</div>
-        <div class="xls-meta">${metaLabel}</div>
+        <div class="xls-meta">${channelLabel} ${scoreLabel}</div>
       </div>
       <div class="xls-preview"></div>
       <div class="xls-actions">
@@ -918,7 +1238,7 @@
     `;
     card.querySelector(".xls-preview").textContent = preview;
     card.querySelector(".xls-reason").textContent =
-      reasonText ? `原因：${reasonText}` : `提示：误伤时点「标注：正常」`;
+      reasonText ? `${reasonText}` : `提示：误伤时点「标注：正常」`;
 
     card.querySelector(".xls-show").addEventListener("click", (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -932,10 +1252,10 @@
       const ok = addSample(KEY_GOOD, pack.fingerprint, pack.preview);
 
       if (features && cfg.mlEnabled) {
-        model.train(features, 0);
-        saveTrainExample(features, 0, pack.handle, pack.preview);
-        updateHandleRep(pack.handle, 0);
-        saveModelState();
+        learnFromLabel(features, 0, {
+          text: pack.text, handle: pack.handle, name: pack.name,
+          isReply: inReplyContext(), hasMedia: hasMediaInArticle(article),
+        });
       }
 
       toast(ok ? "已标注：正常 + ML 学习" : "已存在：正常样本");
@@ -979,23 +1299,21 @@
       const pack = getFingerprintPack(article);
       if (!pack.fingerprint) return toast("没取到内容");
 
-      // 1) 先提取特征（在 addSample 改变 memBad 之前）
+      addSample(KEY_BAD, pack.fingerprint, pack.preview);
       const features = cfg.mlEnabled ? extractFeatures(article) : null;
 
-      // 2) Jaccard 样本
-      addSample(KEY_BAD, pack.fingerprint, pack.preview);
-
-      // 3) ML 训练
       if (features && cfg.mlEnabled) {
-        model.train(features, 1);
-        saveTrainExample(features, 1, pack.handle, pack.preview);
-        updateHandleRep(pack.handle, 1);
-        saveModelState();
+        learnFromLabel(features, 1, {
+          text: pack.text, handle: pack.handle, name: pack.name,
+          isReply: inReplyContext(), hasMedia: hasMediaInArticle(article),
+        });
       }
 
-      // 4) 屏蔽
       forceBlockCurrent(article, 1.0, "manual", "手动标注垃圾");
-      toast("已标注垃圾 + ML 学习");
+      const c = getTrainCounts();
+      toast(hasEnoughMlTraining()
+        ? "已标注垃圾 + ML 学习"
+        : `已标注垃圾；还需正常样本 ${Math.max(0, cfg.mlMinNegativeSamples - c.neg)} 条`);
     }, true);
 
     bar.querySelector(".xls-mini-good").addEventListener("click", (e) => {
@@ -1007,13 +1325,17 @@
       const ok = addSample(KEY_GOOD, pack.fingerprint, pack.preview);
 
       if (features && cfg.mlEnabled) {
-        model.train(features, 0);
-        saveTrainExample(features, 0, pack.handle, pack.preview);
-        updateHandleRep(pack.handle, 0);
-        saveModelState();
+        learnFromLabel(features, 0, {
+          text: pack.text, handle: pack.handle, name: pack.name,
+          isReply: inReplyContext(), hasMedia: hasMediaInArticle(article),
+        });
       }
 
-      toast(ok ? "已标注正常 + ML 学习" : "已存在：正常样本");
+      const c = getTrainCounts();
+      const msg = hasEnoughMlTraining()
+        ? (ok ? "已标注正常 + ML 学习" : "已存在：正常样本")
+        : `已标注正常；还需垃圾样本 ${Math.max(0, cfg.mlMinPositiveSamples - c.pos)} 条`;
+      toast(msg);
     }, true);
 
     textNode.parentElement.appendChild(bar);
@@ -1024,52 +1346,79 @@
   // ============================================================
   function shouldBlock(article) {
     const handle = getHandle(article);
+    const pack = getFingerprintPack(article);
+    const textPreview = (pack.text || "").slice(0, 60).replace(/\n/g, " ");
+    const risk = textRiskProfile(pack.text || "");
 
-    // 关注免屏蔽
-    if (handle && memFollowed.includes(handle)) {
+    if (handle && memFollowed.has(handle)) {
+      log(`[PASS] ${handle} | 关注白名单 | "${textPreview}"`);
       return { block: false, reason: "followed-user" };
     }
 
-    const pack = getFingerprintPack(article);
     if (!pack.text && !pack.name && !pack.handle) return { block: false };
 
-    // 结构通道
     const s = structuralDecision(pack.text || "");
     if (s.hit) {
+      log(`[BLOCK] ${handle} | 结构通道: ${s.kind} | emoji=${s.emojiN} digits=${s.digitN} | "${textPreview}"`);
       return {
         block: true, sim: 1.0, where: "struct",
         reasonText: `${s.kind} (emoji=${s.emojiN}, digits=${s.digitN})`,
       };
     }
 
-    // 启发式通道（零训练可用）
+    const ctxBoost = computeContextBoost(pack.text, handle, pack.name);
+
+    const replyMode = inReplyContext();
+    const cjkProtection = getCjkProtectionLevel(risk, replyMode);
     const h = heuristicDecision(article);
-    if (h.hit) {
-      return {
-        block: true, sim: h.score, where: "heuristic",
-        reasonText: `启发式 (${h.reason})`,
-      };
+    const mlActive = cfg.mlEnabled && hasEnoughMlTraining();
+    let mlRaw = null, mlTh = null, features = null;
+
+    if (mlActive) {
+      features = extractFeatures(article);
+      mlRaw = model.predict(features);
+      mlTh = replyMode ? cfg.mlThresholdReply : cfg.mlThresholdTimeline;
+      if (cjkProtection > 0) mlTh = Math.min(0.95, mlTh + cjkProtection);
     }
 
-    // ML 通道
-    if (cfg.mlEnabled && model.n >= cfg.mlMinSamples) {
-      const features = extractFeatures(article);
-      const prob = model.predict(features);
-      const replyMode = inReplyContext();
-      const th = replyMode ? cfg.mlThresholdReply : cfg.mlThresholdTimeline;
+    const logParts = [];
+    logParts.push(`handle=${handle}`);
+    logParts.push(`reply=${replyMode}`);
+    if (risk.riskScore > 0) logParts.push(`risk=${risk.riskScore.toFixed(2)}`);
+    if (cjkProtection > 0) logParts.push(`cjk_guard=+${cjkProtection.toFixed(2)}`);
+    if (h.score > 0) logParts.push(`heur=${h.score.toFixed(2)}(${h.hit ? "HIT" : "miss"}${h.reason ? ": " + h.reason : ""})`);
+    if (mlActive) logParts.push(`ml_raw=${mlRaw.toFixed(3)} th=${mlTh}`);
+    if (ctxBoost > 0) logParts.push(`ctx_boost=${ctxBoost.toFixed(2)}`);
 
-      log("ML predict", { handle, prob: prob.toFixed(3), th, n: model.n });
-
-      if (prob >= th) {
+    if (h.hit) {
+      if (cjkProtection > 0 && h.score < (replyMode ? 0.75 : 0.85)) {
+        log(`[OVERRIDE] ${logParts.join(" | ")} | 启发式命中但中文低风险保护 | "${textPreview}"`);
+      } else if (!mlActive || mlRaw >= mlTh * 0.5) {
+        log(`[BLOCK] ${logParts.join(" | ")} | 决策=启发式 | "${textPreview}"`);
         return {
-          block: true, sim: prob, where: "ml",
-          reasonText: `ML 判定 (p=${prob.toFixed(3)}, 训练${model.n}例)`,
+          block: true, sim: h.score, where: "heuristic",
+          reasonText: `启发式 (${h.reason})`,
+        };
+      } else if (mlRaw !== null) {
+        log(`[OVERRIDE] ${logParts.join(" | ")} | 启发式命中但 ML 低分覆盖(${mlRaw.toFixed(3)}<${(mlTh * 0.5).toFixed(3)}) | "${textPreview}"`);
+      }
+    }
+
+    if (mlActive) {
+      const guardedCtxBoost = cjkProtection > 0 ? Math.min(ctxBoost, 0.06) : ctxBoost;
+      const mlBoosted = Math.min(mlRaw + guardedCtxBoost, 1);
+      logParts.push(`ml_final=${mlBoosted.toFixed(3)}`);
+      if (mlBoosted >= mlTh) {
+        log(`[BLOCK] ${logParts.join(" | ")} | 决策=ML | "${textPreview}"`);
+        return {
+          block: true, sim: mlBoosted, where: "ml",
+          reasonText: `ML (p=${mlRaw.toFixed(3)}${guardedCtxBoost > 0 ? `+ctx${guardedCtxBoost.toFixed(2)}` : ""}, 训练${memTrain.length}例)`,
         };
       }
-      return { block: false, prob };
+      log(`[PASS] ${logParts.join(" | ")} | 决策=ML放行 | "${textPreview}"`);
+      return { block: false, prob: mlBoosted };
     }
 
-    // Jaccard 回退
     if (!pack.fingerprint) return { block: false };
     const grams = makeNgrams(pack.fingerprint, cfg.ngramN);
     if (!grams.length) return { block: false };
@@ -1077,16 +1426,25 @@
 
     const simBad = bestSimilarity(grams, memBad);
     const simGood = memGood.length ? bestSimilarity(grams, memGood) : 0;
-    const replyMode = inReplyContext();
     const th = replyMode ? cfg.simThresholdReply : cfg.simThresholdTimeline;
 
-    if (simGood >= simBad - 0.02) return { block: false, simBad, simGood };
-    if (simBad >= th) {
+    logParts.push(`jaccard_bad=${simBad.toFixed(3)} good=${simGood.toFixed(3)} th=${th}`);
+
+    if (simGood >= simBad - 0.02) {
+      log(`[PASS] ${logParts.join(" | ")} | 决策=Jaccard白样本保护 | "${textPreview}"`);
+      return { block: false, simBad, simGood };
+    }
+    const jaccardGuard = cjkProtection > 0 ? Math.min(0.18, cjkProtection) : 0;
+    const adjustedTh = Math.min(0.95, th + jaccardGuard);
+    const adjusted = Math.min(simBad + (cjkProtection > 0 ? Math.min(ctxBoost, 0.04) : ctxBoost), 1);
+    if (adjusted >= adjustedTh) {
+      log(`[BLOCK] ${logParts.join(" | ")} | 决策=Jaccard(adj=${adjusted.toFixed(3)}) | "${textPreview}"`);
       return {
-        block: true, sim: simBad, where: replyMode ? "reply" : "timeline",
-        reasonText: `Jaccard (bad=${simBad.toFixed(2)}, good=${simGood.toFixed(2)})`,
+        block: true, sim: adjusted, where: replyMode ? "reply" : "timeline",
+        reasonText: `Jaccard (bad=${simBad.toFixed(2)}, good=${simGood.toFixed(2)}${ctxBoost > 0 ? `, ctx+${ctxBoost.toFixed(2)}` : ""})`,
       };
     }
+    log(`[PASS] ${logParts.join(" | ")} | 决策=Jaccard未达阈值(adj=${adjusted.toFixed(3)}) | "${textPreview}"`);
     return { block: false, simBad, simGood };
   }
 
@@ -1097,12 +1455,13 @@
     if (!article || article.dataset.xlsChecked === "1") return;
     article.dataset.xlsChecked = "1";
 
+    refreshThreadCtx();
     injectMarkButtons(article);
 
     const r = shouldBlock(article);
+    trackThreadResult(r.block);
     if (r.block) {
       block(article, r.sim, r.where, r.reasonText);
-      log("blocked", r);
     }
   }
 
@@ -1164,6 +1523,8 @@
 
   GM_registerMenuCommand("统计：查看当前状态", () => {
     const s = model.getState();
+    const c = getTrainCounts();
+    const active = cfg.mlEnabled && hasEnoughMlTraining();
     const topW = Array.from(model.w)
       .map((v, i) => ({ i, v: Math.abs(v) }))
       .sort((a, b) => b.v - a.v)
@@ -1172,15 +1533,15 @@
       .join("\n");
 
     alert(
-      `=== X ML-Shield v5 ===\n` +
+      `=== X ML-Shield v5.1 ===\n` +
       `垃圾样本：${memBad.length}  正常样本：${memGood.length}\n` +
-      `ML 训练数据：${memTrain.length}  训练次数：${s.n}\n` +
-      `已关注缓存：${memFollowed.length}\n` +
+      `ML 训练数据：${memTrain.length}（垃圾 ${c.pos} / 正常 ${c.neg}）  训练次数：${s.n}\n` +
+      `已关注缓存：${memFollowed.size}\n` +
       `账号特征缓存：${Object.keys(memAcct).length}\n` +
       `Handle 声誉库：${Object.keys(memHRep).length}\n\n` +
       `--- ML 设置 ---\n` +
-      `启用：${cfg.mlEnabled ? "是" : "否"}\n` +
-      `最小样本：${cfg.mlMinSamples}  学习率：${cfg.mlLearningRate}\n` +
+      `启用：${cfg.mlEnabled ? "是" : "否"}  状态：${active ? "已激活" : "等待正/负样本"}\n` +
+      `最小样本：总数 ${cfg.mlMinSamples} / 垃圾 ${cfg.mlMinPositiveSamples} / 正常 ${cfg.mlMinNegativeSamples}  学习率：${cfg.mlLearningRate}\n` +
       `阈值：reply=${cfg.mlThresholdReply}  timeline=${cfg.mlThresholdTimeline}\n\n` +
       `--- Jaccard 回退 ---\n` +
       `阈值：reply=${cfg.simThresholdReply}  timeline=${cfg.simThresholdTimeline}\n` +
@@ -1311,7 +1672,7 @@
     bd.addEventListener("click", hide);
 
     cp.innerHTML = `
-<div class="xls-cp-hd"><span>X ML-Shield v5</span><button class="xls-cp-x">&times;</button></div>
+<div class="xls-cp-hd"><span>X ML-Shield v5.1</span><button class="xls-cp-x">&times;</button></div>
 <div class="xls-cp-bd">
 
   <div class="xls-sec">
@@ -1424,14 +1785,16 @@
       const el = cp.querySelector("#xls-stats");
       if (!el) return;
       const ms = model.getState();
-      const active = ms.n >= cfg.mlMinSamples;
+      const c = getTrainCounts();
+      const active = cfg.mlEnabled && hasEnoughMlTraining();
       el.innerHTML = `
         <span>垃圾样本</span><span class="xls-sv">${memBad.length}</span>
         <span>正常样本</span><span class="xls-sv">${memGood.length}</span>
         <span>ML 训练数据</span><span class="xls-sv">${memTrain.length}</span>
+        <span>ML 垃圾/正常</span><span class="xls-sv">${c.pos}/${c.neg}</span>
         <span>ML 训练步数</span><span class="xls-sv">${ms.n}</span>
-        <span>ML 状态</span><span class="xls-sv">${active ? "已激活" : "Jaccard 回退"}</span>
-        <span>已关注缓存</span><span class="xls-sv">${memFollowed.length}</span>
+        <span>ML 状态</span><span class="xls-sv">${active ? "已激活" : "等正/负样本"}</span>
+        <span>已关注缓存</span><span class="xls-sv">${memFollowed.size}</span>
         <span>账号缓存</span><span class="xls-sv">${Object.keys(memAcct).length}</span>
         <span>Handle 声誉</span><span class="xls-sv">${Object.keys(memHRep).length}</span>
       `;
@@ -1454,7 +1817,7 @@
       "good=", memGood.length,
       "ml.n=", model.n,
       "train=", memTrain.length,
-      "followed=", memFollowed.length,
+      "followed=", memFollowed.size,
       "acctCache=", Object.keys(memAcct).length,
     );
   }
