@@ -1,0 +1,76 @@
+.xls-hidden{ display:none !important; }
+
+.xls-card{
+  margin: 8px 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 10px 12px;
+  backdrop-filter: blur(6px);
+}
+.xls-row{display:flex;justify-content:space-between;gap:10px;align-items:baseline;}
+.xls-title{font-weight:700;font-size:14px;}
+.xls-meta{font-size:12px;opacity:.7;white-space:nowrap;}
+.xls-preview{
+  margin-top:6px;font-size:13px;opacity:.85;line-height:1.35;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.xls-actions{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;}
+.xls-btn{
+  border:1px solid rgba(255,255,255,.16);
+  background:rgba(255,255,255,.08);
+  color:inherit;border-radius:999px;padding:6px 10px;font-size:12px;cursor:pointer;
+}
+.xls-btn:hover{background:rgba(255,255,255,.12);}
+.xls-reason{margin-top:6px;font-size:12px;opacity:.6;}
+
+.xls-inline-actions{
+  margin-top:6px;
+  display:flex; gap:8px; flex-wrap:wrap;
+  opacity:.90;
+  position: relative;
+  z-index: 9999;
+  pointer-events: auto !important;
+}
+.xls-mini{
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.06);
+  border-radius:999px;
+  padding:4px 8px;
+  font-size:12px;
+  cursor:pointer;
+  position: relative;
+  z-index: 10000;
+  pointer-events: auto !important;
+}
+.xls-mini:hover{background:rgba(255,255,255,.10);}
+
+.xls-fab{position:fixed;left:16px;bottom:80px;z-index:99999;width:44px;height:44px;border-radius:50%;background:rgba(29,155,240,.85);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.35);transition:transform .15s;user-select:none;letter-spacing:.5px;}
+.xls-fab:hover{transform:scale(1.12);background:rgba(29,155,240,1);}
+.xls-bd{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;backdrop-filter:blur(2px);}
+.xls-bd.open{display:block;}
+.xls-cp{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:420px;max-height:82vh;z-index:100001;background:#16181c;border:1px solid rgba(255,255,255,.12);border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.6);color:#e7e9ea;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;flex-direction:column;}
+.xls-cp.open{display:flex;}
+.xls-cp-hd{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);font-weight:700;font-size:15px;}
+.xls-cp-x{background:none;border:none;color:#e7e9ea;font-size:22px;cursor:pointer;padding:2px 8px;border-radius:50%;line-height:1;}
+.xls-cp-x:hover{background:rgba(255,255,255,.1);}
+.xls-cp-bd{overflow-y:auto;padding:0 0 14px;flex:1;}
+.xls-sec{padding:14px 16px 2px;}
+.xls-sec-t{font-size:11px;font-weight:700;color:#71767b;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;}
+.xls-opt{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04);}
+.xls-opt:last-child{border-bottom:none;}
+.xls-sw{position:relative;width:38px;height:20px;background:rgba(255,255,255,.18);border-radius:10px;cursor:pointer;transition:background .2s;flex-shrink:0;}
+.xls-sw.on{background:#1d9bf0;}
+.xls-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform .2s;}
+.xls-sw.on::after{transform:translateX(18px);}
+.xls-ni{width:62px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#e7e9ea;padding:4px 6px;font-size:12px;text-align:center;outline:none;}
+.xls-ni:focus{border-color:#1d9bf0;}
+.xls-sg{display:grid;grid-template-columns:1fr auto;gap:4px 16px;font-size:13px;padding:4px 0;}
+.xls-sv{font-weight:700;color:#1d9bf0;text-align:right;}
+.xls-cp-acts{display:flex;flex-wrap:wrap;gap:6px;padding:8px 0 0;}
+.xls-cp-ab{flex:1 1 calc(50% - 3px);text-align:center;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#e7e9ea;border-radius:8px;padding:8px 4px;font-size:12px;cursor:pointer;transition:background .15s;}
+.xls-cp-ab:hover{background:rgba(255,255,255,.1);}
+.xls-cp-ab.red{border-color:rgba(244,33,46,.25);color:#f4212e;}
+.xls-cp-ab.red:hover{background:rgba(244,33,46,.1);}
+.xls-mdb{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#e7e9ea;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;}
+.xls-mdb:hover{background:rgba(255,255,255,.1);}

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <span>X-Filter <span class="version">v5.1.0</span></span>
+  </div>
+
+  <div class="body">
+    <div class="section">
+      <div class="section-title">模式</div>
+      <div class="option">
+        <span class="option-label">标记模式（推文旁显示标注按钮）</span>
+        <div class="toggle on" id="toggle-markingMode" data-key="markingMode"></div>
+      </div>
+      <div class="option">
+        <span class="option-label">屏蔽方式</span>
+        <button class="mode-btn" id="btn-blockMode">折叠卡片</button>
+      </div>
+      <div class="option">
+        <span class="option-label">ML 分类器</span>
+        <div class="toggle on" id="toggle-mlEnabled" data-key="mlEnabled"></div>
+      </div>
+      <div class="option">
+        <span class="option-label">启发式通道（零训练自动拦截）</span>
+        <div class="toggle on" id="toggle-heuristicChannel" data-key="heuristicChannel"></div>
+      </div>
+      <div class="option">
+        <span class="option-label">关注免屏蔽</span>
+        <div class="toggle on" id="toggle-followedByHover" data-key="followedByHover"></div>
+      </div>
+      <div class="option">
+        <span class="option-label">结构通道（emoji/digits-only 直杀）</span>
+        <div class="toggle on" id="toggle-structuralChannel" data-key="structuralChannel"></div>
+      </div>
+      <div class="option">
+        <span class="option-label">调试日志</span>
+        <div class="toggle" id="toggle-debug" data-key="debug"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">ML 参数</div>
+      <div class="option">
+        <span class="option-label">回复区阈值</span>
+        <input type="number" class="num-input" id="num-mlThresholdReply" data-key="mlThresholdReply" min="0.1" max="0.95" step="0.05">
+      </div>
+      <div class="option">
+        <span class="option-label">时间线阈值</span>
+        <input type="number" class="num-input" id="num-mlThresholdTimeline" data-key="mlThresholdTimeline" min="0.1" max="0.95" step="0.05">
+      </div>
+      <div class="option">
+        <span class="option-label">最小训练样本数</span>
+        <input type="number" class="num-input" id="num-mlMinSamples" data-key="mlMinSamples" min="1" max="100" step="1">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">启发式参数</div>
+      <div class="option">
+        <span class="option-label">回复区阈值</span>
+        <input type="number" class="num-input" id="num-heuristicThresholdReply" data-key="heuristicThresholdReply" min="0.15" max="0.9" step="0.05">
+      </div>
+      <div class="option">
+        <span class="option-label">时间线阈值</span>
+        <input type="number" class="num-input" id="num-heuristicThresholdTimeline" data-key="heuristicThresholdTimeline" min="0.3" max="0.95" step="0.05">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Jaccard 回退</div>
+      <div class="option">
+        <span class="option-label">回复区阈值</span>
+        <input type="number" class="num-input" id="num-simThresholdReply" data-key="simThresholdReply" min="0.05" max="0.95" step="0.05">
+      </div>
+      <div class="option">
+        <span class="option-label">时间线阈值</span>
+        <input type="number" class="num-input" id="num-simThresholdTimeline" data-key="simThresholdTimeline" min="0.05" max="0.95" step="0.05">
+      </div>
+      <div class="option">
+        <span class="option-label">n-gram N</span>
+        <input type="number" class="num-input" id="num-ngramN" data-key="ngramN" min="2" max="6" step="1">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">结构通道</div>
+      <div class="option">
+        <span class="option-label">emoji-only 最小数</span>
+        <input type="number" class="num-input" id="num-emojiOnlyMinCount" data-key="emojiOnlyMinCount" min="1" max="10" step="1">
+      </div>
+      <div class="option">
+        <span class="option-label">digits-only 最小数</span>
+        <input type="number" class="num-input" id="num-digitsOnlyMinCount" data-key="digitsOnlyMinCount" min="1" max="10" step="1">
+      </div>
+      <div class="option">
+        <span class="option-label">混合 emoji 最小</span>
+        <input type="number" class="num-input" id="num-mixedMinEmoji" data-key="mixedMinEmoji" min="1" max="10" step="1">
+      </div>
+      <div class="option">
+        <span class="option-label">混合 digits 最小</span>
+        <input type="number" class="num-input" id="num-mixedMinDigits" data-key="mixedMinDigits" min="1" max="10" step="1">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">统计 <span id="stats-status"></span></div>
+      <div class="stats" id="stats-grid">
+        <span>垃圾样本</span><span class="stats-val" id="s-bad">0</span>
+        <span>正常样本</span><span class="stats-val" id="s-good">0</span>
+        <span>ML 训练数据</span><span class="stats-val" id="s-train">0</span>
+        <span>ML 垃圾/正常</span><span class="stats-val" id="s-train-ratio">0/0</span>
+        <span>ML 训练步数</span><span class="stats-val" id="s-steps">0</span>
+        <span>已关注缓存</span><span class="stats-val" id="s-followed">0</span>
+        <span>账号缓存</span><span class="stats-val" id="s-accounts">0</span>
+        <span>Handle 声誉</span><span class="stats-val" id="s-hrep">0</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">操作</div>
+      <div class="actions">
+        <button class="btn" id="action-export">导出 JSON</button>
+        <button class="btn" id="action-import">导入 JSON</button>
+        <button class="btn" id="action-retrain">重新训练 ML</button>
+        <button class="btn danger" id="action-clear">清空学习数据</button>
+        <button class="btn danger" id="action-cfol">清空关注缓存</button>
+        <button class="btn danger" id="action-cacct">清空账号缓存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">X-Filter v5.1.0 — 纯本地自学习过滤器</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

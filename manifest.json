@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "X-Filter",
+  "version": "5.1.0",
+  "description": "内置轻量在线逻辑回归分类器，从用户标注学习文本+账号特征联合判定垃圾推文",
+  "author": "好奇猫a & Izumi Chino",
+  "permissions": ["storage"],
+  "host_permissions": ["https://x.com/*", "https://twitter.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "X-Filter",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "x-filter@acnekot.github.io",
+      "strict_min_version": "112.0"
+    }
+  }
+}
