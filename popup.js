@@ -112,11 +112,172 @@ async function saveAndNotify(key, value) {
   }
 }
 
+// ============================================================
+//  云同步
+// ============================================================
+function syncStatus(msg, type) {
+  const el = document.getElementById("sync-status");
+  if (!el) return;
+  el.textContent = msg;
+  el.className = "sync-status";
+  if (type) el.classList.add(type);
+}
+
+async function loadSyncSettings() {
+  const res = await chrome.storage.local.get(["xls_sync_token", "xls_sync_gist_id"]);
+  const tokenInput = document.getElementById("sync-token");
+  const gistInput = document.getElementById("sync-gist-id");
+  if (tokenInput && res.xls_sync_token) tokenInput.value = res.xls_sync_token;
+  if (gistInput && res.xls_sync_gist_id) gistInput.value = res.xls_sync_gist_id;
+}
+
+async function saveSyncSettings() {
+  const token = document.getElementById("sync-token").value.trim();
+  const gistId = document.getElementById("sync-gist-id").value.trim();
+  if (token) await chrome.storage.local.set({ xls_sync_token: token });
+  if (gistId) await chrome.storage.local.set({ xls_sync_gist_id: gistId });
+}
+
+async function doSyncPush() {
+  const token = document.getElementById("sync-token").value.trim();
+  const gistId = document.getElementById("sync-gist-id").value.trim();
+  if (!token) { syncStatus("请填写 GitHub Token", "error"); return; }
+  if (!gistId) { syncStatus("请填写 Gist ID", "error"); return; }
+  if (!tabId) { syncStatus("请在 x.com 页面使用此功能", "error"); return; }
+
+  await saveSyncSettings();
+  syncStatus("正在导出数据…", "loading");
+
+  try {
+    const resp = await sendToContent({ type: "syncExport" });
+    if (!resp || !resp.success) {
+      syncStatus("导出失败", "error"); return;
+    }
+    const payload = resp.payload;
+
+    const filename = `x-filter-data.json`;
+    const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+      method: "PATCH",
+      headers: {
+        "Authorization": `token ${token}`,
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        files: {
+          [filename]: {
+            content: JSON.stringify(payload, null, 2),
+          },
+        },
+      }),
+    });
+
+    if (res.ok || res.status === 200) {
+      const now = new Date().toLocaleString();
+      syncStatus(`已推送到 Gist (${now})`, "success");
+      chrome.storage.local.set({ xls_last_sync: Date.now() });
+    } else {
+      const err = await res.json().catch(() => ({}));
+      syncStatus(`推送失败: ${err.message || res.status}`, "error");
+    }
+  } catch (e) {
+    syncStatus(`网络错误: ${e.message}`, "error");
+  }
+}
+
+async function doSyncPull() {
+  const token = document.getElementById("sync-token").value.trim();
+  const gistId = document.getElementById("sync-gist-id").value.trim();
+  if (!token) { syncStatus("请填写 GitHub Token", "error"); return; }
+  if (!gistId) { syncStatus("请填写 Gist ID", "error"); return; }
+  if (!tabId) { syncStatus("请在 x.com 页面使用此功能", "error"); return; }
+
+  await saveSyncSettings();
+  syncStatus("正在从 Gist 拉取…", "loading");
+
+  try {
+    const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+      headers: {
+        "Authorization": `token ${token}`,
+        "Accept": "application/vnd.github.v3+json",
+      },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      syncStatus(`拉取失败: ${err.message || res.status}`, "error"); return;
+    }
+
+    const gist = await res.json();
+    const files = gist.files || {};
+    const content = Object.values(files)[0];
+    if (!content || !content.content) {
+      syncStatus("Gist 中没有找到数据文件", "error"); return;
+    }
+
+    let payload;
+    try { payload = JSON.parse(content.content); } catch {
+      syncStatus("Gist 内容不是有效 JSON", "error"); return;
+    }
+
+    const resp = await sendToContent({ type: "syncImport", payload: payload });
+    if (resp && resp.success) {
+      const now = new Date().toLocaleString();
+      syncStatus(`已从 Gist 拉取并合并 (${now})`, "success");
+      chrome.storage.local.set({ xls_last_sync: Date.now() });
+      setTimeout(refreshStats, 300);
+    } else {
+      syncStatus("合并失败", "error");
+    }
+  } catch (e) {
+    syncStatus(`网络错误: ${e.message}`, "error");
+  }
+}
+
+async function doImportFromUrl() {
+  const url = document.getElementById("sync-url").value.trim();
+  if (!url) { syncStatus("请输入 JSON 文件的 URL", "error"); return; }
+  if (!tabId) { syncStatus("请在 x.com 页面使用此功能", "error"); return; }
+
+  syncStatus("正在下载…", "loading");
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      syncStatus(`下载失败: HTTP ${res.status}`, "error"); return;
+    }
+    const text = await res.text();
+    let payload;
+    try { payload = JSON.parse(text); } catch {
+      syncStatus("下载内容不是有效 JSON", "error"); return;
+    }
+
+    const resp = await sendToContent({ type: "syncImport", payload: payload });
+    if (resp && resp.success) {
+      syncStatus("已从 URL 导入并合并", "success");
+      setTimeout(refreshStats, 300);
+    } else {
+      syncStatus("合并失败", "error");
+    }
+  } catch (e) {
+    syncStatus(`网络错误: ${e.message}`, "error");
+  }
+}
+
+// ============================================================
+//  入口
+// ============================================================
 document.addEventListener("DOMContentLoaded", async () => {
   await loadConfig();
   await getActiveTab();
   updateUI();
-  if (tabId) refreshStats();
+  loadSyncSettings();
+  if (tabId) {
+    refreshStats();
+    document.getElementById("sync-info").textContent = "纯本地自学习过滤器";
+  } else {
+    document.getElementById("sync-info").textContent = "请打开 x.com 使用";
+  }
 
   document.querySelectorAll(".toggle").forEach(el => {
     el.addEventListener("click", async () => {
@@ -153,24 +314,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (tabId) {
       sendToContent({ type: "action", action: "export" });
     } else {
-      const data = {};
-      const keys = [...Object.keys(DEFAULTS), ...STORAGE_KEYS];
-      const all = await chrome.storage.local.get(keys);
+      const all = await chrome.storage.local.get([...Object.keys(DEFAULTS), ...STORAGE_KEYS]);
       const payload = {
-        schema: "x-learnshield-export",
-        version: 5,
-        exportedAt: new Date().toISOString(),
+        _meta: {
+          schema: "x-filter-export-v2",
+          version: 5,
+          exportedAt: new Date().toISOString(),
+          exportedFrom: "Browser Extension (standalone)",
+          summary: {},
+        },
         config: {},
-        samplesBad: all["xls_samplesBad_v4"] || [],
-        samplesGood: all["xls_samplesGood_v4"] || [],
-        followedHandles: all["xls_followedHandles_v1"] || [],
-        trainData: all["xls_trainData_v1"] || [],
-        modelState: all["xls_modelState_v1"] || {},
-        accountCache: all["xls_accountCache_v1"] || {},
-        handleReputation: all["xls_handleRep_v1"] || {},
+        data: {
+          badSamples: all["xls_samplesBad_v4"] || [],
+          goodSamples: all["xls_samplesGood_v4"] || [],
+          trainingData: all["xls_trainData_v1"] || [],
+          followedHandles: all["xls_followedHandles_v1"] || [],
+          modelState: all["xls_modelState_v1"] || {},
+          accountCache: all["xls_accountCache_v1"] || {},
+          handleReputation: all["xls_handleRep_v1"] || {},
+        },
       };
-      for (const k of Object.keys(DEFAULTS)) payload.config[k] = all[k] !== undefined ? all[k] : DEFAULTS[k];
-      const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+      for (const k of Object.keys(DEFAULTS)) {
+        payload.config[k] = { value: all[k] !== undefined ? all[k] : DEFAULTS[k], default: DEFAULTS[k] };
+      }
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -185,6 +352,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!json) return;
     if (tabId) {
       sendToContent({ type: "action", action: "import", data: json });
+      setTimeout(refreshStats, 500);
     }
   });
 
@@ -210,4 +378,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     sendToContent({ type: "action", action: "clearAccounts" });
     setTimeout(refreshStats, 500);
   });
+
+  // Sync buttons
+  document.getElementById("sync-load-url").addEventListener("click", doImportFromUrl);
+  document.getElementById("sync-push").addEventListener("click", doSyncPush);
+  document.getElementById("sync-pull").addEventListener("click", doSyncPull);
+
+  // Save sync settings on input change
+  document.getElementById("sync-token").addEventListener("change", saveSyncSettings);
+  document.getElementById("sync-gist-id").addEventListener("change", saveSyncSettings);
 });

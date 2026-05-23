@@ -638,24 +638,53 @@ function learnFromLabel(features, label, rawData) {
 // ============================================================
 //  导出 / 导入 / 清空
 // ============================================================
-function exportData() {
-  const payload = {
-    schema: "x-learnshield-export",
-    version: 5,
-    featureCount: FEATURE_COUNT,
-    exportedAt: new Date().toISOString(),
-    config: {},
-    samplesBad: memBad,
-    samplesGood: memGood,
-    followedHandles: [...memFollowed],
-    trainData: memTrain,
-    modelState: model.getState(),
-    accountCache: memAcct,
-    handleReputation: memHRep,
-  };
-  for (const k of Object.keys(DEFAULT)) payload.config[k] = cfg[k];
+function getExportPayload() {
+  const c = getTrainCounts();
+  const ms = model.getState();
+  const active = cfg.mlEnabled && hasEnoughMlTraining();
+  const configOut = {};
+  for (const k of Object.keys(DEFAULT)) {
+    configOut[k] = { value: cfg[k], default: DEFAULT[k] };
+  }
 
-  const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+  return {
+    _meta: {
+      schema: "x-filter-export-v2",
+      version: 5,
+      featureVersion: FEATURE_VERSION,
+      exportedAt: new Date().toISOString(),
+      exportedFrom: typeof GM_getValue !== "undefined" ? "Tampermonkey" : "Browser Extension",
+      summary: {
+        badSamples: memBad.length,
+        goodSamples: memGood.length,
+        trainingExamples: memTrain.length,
+        spamExamples: c.pos,
+        normalExamples: c.neg,
+        followedHandles: memFollowed.size,
+        cachedAccounts: Object.keys(memAcct).length,
+        handleReputations: Object.keys(memHRep).length,
+        modelTrainingSteps: ms.n,
+        mlStatus: active ? "active" : "pending",
+        blockMode: cfg.blockMode,
+        markingMode: cfg.markingMode,
+      },
+    },
+    config: configOut,
+    data: {
+      badSamples: memBad,
+      goodSamples: memGood,
+      trainingData: memTrain,
+      followedHandles: [...memFollowed],
+      modelState: model.getState(),
+      accountCache: memAcct,
+      handleReputation: memHRep,
+    },
+  };
+}
+
+function exportData() {
+  const payload = getExportPayload();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -728,16 +757,41 @@ function importData(pastedJson) {
     if (json === null) return;
     try { data = JSON.parse(json); } catch { alert("解析失败：不是合法 JSON"); return; }
   }
-  if (!data || data.schema !== "x-learnshield-export") {
-    alert("格式不对：不是本脚本导出的数据"); return;
+
+  const isV2 = data && data._meta && data._meta.schema === "x-filter-export-v2" && data.data;
+  const isV1 = data && data.schema === "x-learnshield-export";
+  if (!isV1 && !isV2) {
+    alert("格式不对：不是本扩展导出的数据"); return;
   }
 
-  memBad = mergeSamples(memBad, data.samplesBad || [], cfg.maxBadSamples);
-  memGood = mergeSamples(memGood, data.samplesGood || [], cfg.maxGoodSamples);
-  memFollowed = new Set(mergeStrings([...memFollowed], data.followedHandles, 8000));
-  memTrain = mergeTrainData(memTrain, data.trainData, cfg.mlMaxTrainData);
-  memHRep = mergeHandleRep(memHRep, data.handleReputation);
-  memAcct = mergeAccountCache(memAcct, data.accountCache);
+  let badSamples, goodSamples, followedHandles, trainData, modelState, accountCache, handleReputation, importedConfig;
+  let importedSummary = null;
+
+  if (isV2) {
+    badSamples = (data.data && data.data.badSamples) || [];
+    goodSamples = (data.data && data.data.goodSamples) || [];
+    followedHandles = (data.data && data.data.followedHandles) || [];
+    trainData = (data.data && data.data.trainingData) || [];
+    accountCache = (data.data && data.data.accountCache) || {};
+    handleReputation = (data.data && data.data.handleReputation) || {};
+    importedSummary = data._meta.summary || null;
+    importedConfig = data.config || {};
+  } else {
+    badSamples = data.samplesBad || [];
+    goodSamples = data.samplesGood || [];
+    followedHandles = data.followedHandles || [];
+    trainData = data.trainData || [];
+    accountCache = data.accountCache || {};
+    handleReputation = data.handleReputation || {};
+    importedConfig = data.config || {};
+  }
+
+  memBad = mergeSamples(memBad, badSamples, cfg.maxBadSamples);
+  memGood = mergeSamples(memGood, goodSamples, cfg.maxGoodSamples);
+  memFollowed = new Set(mergeStrings([...memFollowed], followedHandles, 8000));
+  memTrain = mergeTrainData(memTrain, trainData, cfg.mlMaxTrainData);
+  memHRep = mergeHandleRep(memHRep, handleReputation);
+  memAcct = mergeAccountCache(memAcct, accountCache);
 
   saveArr(KEY_BAD, memBad);
   saveArr(KEY_GOOD, memGood);
@@ -746,16 +800,21 @@ function importData(pastedJson) {
   saveObj(KEY_HREP, memHRep);
   storageSet(KEY_ACCT, memAcct);
 
-  if (data.trainData && data.trainData.length) {
+  if (trainData && trainData.length) {
     retrainModel();
   }
 
-  alert(
-    `导入完成（已合并去重）：\n` +
-    `垃圾样本：${memBad.length}\n正常样本：${memGood.length}\n` +
-    `ML 训练数据：${memTrain.length}\n已关注缓存：${memFollowed.size}\n` +
-    `刷新页面后生效。`
-  );
+  const c = getTrainCounts();
+  const active = cfg.mlEnabled && hasEnoughMlTraining();
+  let msg =
+    `导入完成（已合并去重）\n` +
+    `═══════════════════\n` +
+    `垃圾样本：${memBad.length}  正常样本：${memGood.length}\n` +
+    `ML 训练：${memTrain.length}（垃圾 ${c.pos} / 正常 ${c.neg}）\n` +
+    `ML 状态：${active ? "已激活 ✓" : "等待样本…"}\n` +
+    `已关注：${memFollowed.size}  账号缓存：${Object.keys(memAcct).length}\n` +
+    `刷新页面后生效。`;
+  alert(msg);
 }
 
 function clearSamples() {
@@ -1607,6 +1666,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "clearAccounts": clearAccountCache(); break;
     }
     return false;
+  }
+  if (message.type === "syncExport") {
+    const payload = getExportPayload();
+    sendResponse({ success: true, payload: payload });
+    return true;
+  }
+  if (message.type === "syncImport") {
+    if (message.payload) {
+      importData(JSON.stringify(message.payload));
+      sendResponse({ success: true });
+    } else {
+      sendResponse({ success: false, error: "no payload" });
+    }
+    return true;
   }
   return false;
 });

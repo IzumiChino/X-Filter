@@ -131,9 +131,29 @@
         <button class="btn danger" id="action-cacct">清空账号缓存</button>
       </div>
     </div>
+
+    <div class="section">
+      <div class="section-title">数据同步</div>
+      <div class="sync-row">
+        <input type="text" class="sync-input" id="sync-url" placeholder="输入 JSON 文件的原始 URL...">
+        <button class="btn sync-btn" id="sync-load-url">从 URL 导入</button>
+      </div>
+      <div class="sync-divider">— GitHub Gist 同步 —</div>
+      <div class="sync-row">
+        <input type="password" class="sync-input" id="sync-token" placeholder="GitHub Personal Access Token">
+      </div>
+      <div class="sync-row">
+        <input type="text" class="sync-input" id="sync-gist-id" placeholder="Gist ID（如 abc123def456）">
+      </div>
+      <div class="sync-actions">
+        <button class="btn" id="sync-push">推送到 Gist</button>
+        <button class="btn" id="sync-pull">从 Gist 拉取</button>
+      </div>
+      <div class="sync-status" id="sync-status"></div>
+    </div>
   </div>
 
-  <div class="footer">X-Filter v5.1.0 — 纯本地自学习过滤器</div>
+  <div class="footer">X-Filter v5.1.0 — <span id="sync-info">纯本地自学习过滤器</span></div>
 
   <script src="popup.js"></script>
 </body>
