@@ -1157,30 +1157,51 @@ function blockFold(article, sim, where, reasonText) {
   const channelLabel = channelMap[where] || where;
   const scoreLabel = sim != null ? sim.toFixed(2) : "—";
 
-  card.insertAdjacentHTML("afterbegin", `
-    <div class="xls-row">
-      <div class="xls-title">已屏蔽：疑似垃圾</div>
-      <div class="xls-meta">${channelLabel} ${scoreLabel}</div>
-    </div>
-    <div class="xls-preview"></div>
-    <div class="xls-actions">
-      <button class="xls-btn xls-show" type="button">展开本条</button>
-      <button class="xls-btn xls-mark-good" type="button">标注：正常</button>
-    </div>
-    <div class="xls-reason"></div>
-  `);
-  card.querySelector(".xls-preview").textContent = preview;
-  card.querySelector(".xls-reason").textContent =
-    reasonText ? `${reasonText}` : `提示：误伤时点「标注：正常」`;
+  const row = document.createElement("div");
+  row.className = "xls-row";
+  const titleEl = document.createElement("div");
+  titleEl.className = "xls-title";
+  titleEl.textContent = "已屏蔽：疑似垃圾";
+  const metaEl = document.createElement("div");
+  metaEl.className = "xls-meta";
+  metaEl.textContent = channelLabel + " " + scoreLabel;
+  row.appendChild(titleEl);
+  row.appendChild(metaEl);
 
-  card.querySelector(".xls-show").addEventListener("click", (e) => {
+  const previewEl = document.createElement("div");
+  previewEl.className = "xls-preview";
+  previewEl.textContent = preview;
+
+  const actions = document.createElement("div");
+  actions.className = "xls-actions";
+  const showBtn = document.createElement("button");
+  showBtn.className = "xls-btn xls-show";
+  showBtn.type = "button";
+  showBtn.textContent = "展开本条";
+  const goodBtn = document.createElement("button");
+  goodBtn.className = "xls-btn xls-mark-good";
+  goodBtn.type = "button";
+  goodBtn.textContent = "标注：正常";
+  actions.appendChild(showBtn);
+  actions.appendChild(goodBtn);
+
+  const reasonEl = document.createElement("div");
+  reasonEl.className = "xls-reason";
+  reasonEl.textContent = reasonText || "提示：误伤时点「标注：正常」";
+
+  card.appendChild(row);
+  card.appendChild(previewEl);
+  card.appendChild(actions);
+  card.appendChild(reasonEl);
+
+  showBtn.addEventListener("click", (e) => {
     e.preventDefault(); e.stopPropagation();
     textNode.classList.remove("xls-hidden");
     card.remove();
     article.dataset.xlsFolded = "0";
   }, true);
 
-  card.querySelector(".xls-mark-good").addEventListener("click", (e) => {
+  goodBtn.addEventListener("click", (e) => {
     e.preventDefault(); e.stopPropagation();
     const ok = addSample(KEY_GOOD, pack.fingerprint, pack.preview);
 
@@ -1220,12 +1241,18 @@ function injectMarkButtons(article) {
 
   const bar = document.createElement("div");
   bar.className = "xls-inline-actions";
-  bar.insertAdjacentHTML("afterbegin", `
-    <button class="xls-mini xls-mini-bad" type="button">标注垃圾</button>
-    <button class="xls-mini xls-mini-good" type="button">标注正常</button>
-  `);
+  const badBtn = document.createElement("button");
+  badBtn.className = "xls-mini xls-mini-bad";
+  badBtn.type = "button";
+  badBtn.textContent = "标注垃圾";
+  const goodBtn2 = document.createElement("button");
+  goodBtn2.className = "xls-mini xls-mini-good";
+  goodBtn2.type = "button";
+  goodBtn2.textContent = "标注正常";
+  bar.appendChild(badBtn);
+  bar.appendChild(goodBtn2);
 
-  bar.querySelector(".xls-mini-bad").addEventListener("click", (e) => {
+  badBtn.addEventListener("click", (e) => {
     e.preventDefault(); e.stopPropagation();
     const pack = getFingerprintPack(article);
     if (!pack.fingerprint) return toast("没取到内容");
@@ -1247,7 +1274,7 @@ function injectMarkButtons(article) {
       : `已标注垃圾；还需正常样本 ${Math.max(0, cfg.mlMinNegativeSamples - c.neg)} 条`);
   }, true);
 
-  bar.querySelector(".xls-mini-good").addEventListener("click", (e) => {
+  goodBtn2.addEventListener("click", (e) => {
     e.preventDefault(); e.stopPropagation();
     const pack = getFingerprintPack(article);
     if (!pack.fingerprint) return toast("没取到内容");
@@ -1548,17 +1575,24 @@ function createControlPanel() {
     const c = getTrainCounts();
     const active = cfg.mlEnabled && hasEnoughMlTraining();
     el.replaceChildren();
-    el.insertAdjacentHTML("afterbegin", `
-      <span>垃圾样本</span><span class="xls-sv">${memBad.length}</span>
-      <span>正常样本</span><span class="xls-sv">${memGood.length}</span>
-      <span>ML 训练数据</span><span class="xls-sv">${memTrain.length}</span>
-      <span>ML 垃圾/正常</span><span class="xls-sv">${c.pos}/${c.neg}</span>
-      <span>ML 训练步数</span><span class="xls-sv">${ms.n}</span>
-      <span>ML 状态</span><span class="xls-sv">${active ? "已激活" : "等正/负样本"}</span>
-      <span>已关注缓存</span><span class="xls-sv">${memFollowed.size}</span>
-      <span>账号缓存</span><span class="xls-sv">${Object.keys(memAcct).length}</span>
-      <span>Handle 声誉</span><span class="xls-sv">${Object.keys(memHRep).length}</span>
-    `);
+    const addRow = (label, value) => {
+      const s1 = document.createElement("span");
+      s1.textContent = label;
+      const s2 = document.createElement("span");
+      s2.className = "xls-sv";
+      s2.textContent = value;
+      el.appendChild(s1);
+      el.appendChild(s2);
+    };
+    addRow("垃圾样本", memBad.length);
+    addRow("正常样本", memGood.length);
+    addRow("ML 训练数据", memTrain.length);
+    addRow("ML 垃圾/正常", c.pos + "/" + c.neg);
+    addRow("ML 训练步数", ms.n);
+    addRow("ML 状态", active ? "已激活" : "等正/负样本");
+    addRow("已关注缓存", memFollowed.size);
+    addRow("账号缓存", Object.keys(memAcct).length);
+    addRow("Handle 声誉", Object.keys(memHRep).length);
   }
 
   document.body.append(fab, bd, cp);

@@ -96,9 +96,11 @@ async function refreshStats() {
     document.getElementById("s-hrep").textContent = stats.handleRep || 0;
     const statusEl = document.getElementById("stats-status");
     if (statusEl) {
-      const dot = stats.mlActive ? "active" : "inactive";
       statusEl.replaceChildren();
-      statusEl.insertAdjacentHTML("afterbegin", `<span class="status-dot ${dot}"></span>${stats.mlActive ? "ML 已激活" : "等正/负样本"}`);
+      const dotSpan = document.createElement("span");
+      dotSpan.className = "status-dot " + (stats.mlActive ? "active" : "inactive");
+      statusEl.appendChild(dotSpan);
+      statusEl.appendChild(document.createTextNode(stats.mlActive ? "ML 已激活" : "等正/负样本"));
     }
   } catch (e) {
     // tab might not have content script loaded
