@@ -108,4 +108,8 @@ ML 需要总样本 ≥ `mlMinSamples`（默认 8），且垃圾/正常各 ≥ 3 
 
 ## License
 
-MIT
+本软件采用 **X-Filter License v1.0** —— 非商用 + 强制开源。
+详见 [LICENSE](./LICENSE)。
+
+- 禁止用于任何商业目的
+- 修改和衍生作品必须开源，并以相同协议发布
