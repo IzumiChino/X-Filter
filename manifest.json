@@ -33,7 +33,7 @@
       "id": "x-filter@acnekot.github.io",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": true,
+        "required": [],
         "storage": "All spam-label data and ML model weights are stored locally via browser.storage.local; no data is transmitted externally. Cloud sync is manually triggered by the user."
       }
     }
