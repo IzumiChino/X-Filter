@@ -244,3 +244,12 @@ body {
 .about-link:hover {
   text-decoration: underline;
 }
+
+/* — Collapse — */
+.collapse-trigger {
+  cursor: pointer;
+  user-select: none;
+}
+.collapse-trigger:hover {
+  color: #e7e9ea;
+}

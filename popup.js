@@ -444,4 +444,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("sync-token").addEventListener("change", saveSyncSettings);
   document.getElementById("sync-gist-id").addEventListener("change", saveSyncSettings);
   document.getElementById("sync-default-url").addEventListener("change", saveSyncSettings);
+
+  // About collapse toggle
+  document.getElementById("about-trigger").addEventListener("click", () => {
+    const body = document.getElementById("about-body");
+    const trigger = document.getElementById("about-trigger");
+    const open = body.style.display !== "none";
+    body.style.display = open ? "none" : "block";
+    trigger.textContent = open ? "关于 ▾" : "关于 ▴";
+  });
 });

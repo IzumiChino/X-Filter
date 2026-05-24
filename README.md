@@ -22,7 +22,7 @@
 ### Firefox
 
 1. 下载 `x-filter-v1.0.1-firefox.xpi`
-2. 打开 `about:addons`，点击齿轮 →「从文件安装附加组件」
+2. 打开 `about:debugging` →「此 Firefox」→「临时加载附加组件」
 3. 选择 `.xpi` 文件
 4. 刷新 `x.com`
 
