@@ -1,0 +1,62 @@
+{
+  "_meta": {
+    "schema": "x-filter-export-v2",
+    "version": 5,
+    "featureVersion": 3,
+    "exportedAt": "2026-01-01T00:00:00.000Z",
+    "exportedFrom": "X-Filter Default Rules",
+    "summary": {
+      "badSamples": 0,
+      "goodSamples": 0,
+      "trainingExamples": 0,
+      "spamExamples": 0,
+      "normalExamples": 0,
+      "followedHandles": 0,
+      "cachedAccounts": 0,
+      "handleReputations": 0,
+      "modelTrainingSteps": 0,
+      "mlStatus": "pending",
+      "blockMode": "fold",
+      "markingMode": true
+    }
+  },
+  "config": {
+    "simThresholdReply": { "value": 0.32, "default": 0.32 },
+    "simThresholdTimeline": { "value": 0.40, "default": 0.40 },
+    "ngramN": { "value": 3, "default": 3 },
+    "maxBadSamples": { "value": 350, "default": 350 },
+    "maxGoodSamples": { "value": 150, "default": 150 },
+    "markingMode": { "value": true, "default": true },
+    "blockMode": { "value": "fold", "default": "fold" },
+    "previewLen": { "value": 80, "default": 80 },
+    "followedByHover": { "value": true, "default": true },
+    "structuralChannel": { "value": true, "default": true },
+    "emojiOnlyMinCount": { "value": 3, "default": 3 },
+    "digitsOnlyMinCount": { "value": 2, "default": 2 },
+    "mixedMinEmoji": { "value": 2, "default": 2 },
+    "mixedMinDigits": { "value": 1, "default": 1 },
+    "structuralReplyOnly": { "value": false, "default": false },
+    "heuristicChannel": { "value": true, "default": true },
+    "heuristicThresholdReply": { "value": 0.40, "default": 0.40 },
+    "heuristicThresholdTimeline": { "value": 0.70, "default": 0.70 },
+    "mlEnabled": { "value": true, "default": true },
+    "mlMinSamples": { "value": 8, "default": 8 },
+    "mlThresholdReply": { "value": 0.55, "default": 0.55 },
+    "mlThresholdTimeline": { "value": 0.65, "default": 0.65 },
+    "mlLearningRate": { "value": 0.05, "default": 0.05 },
+    "mlL2": { "value": 0.001, "default": 0.001 },
+    "mlMaxTrainData": { "value": 500, "default": 500 },
+    "mlMinPositiveSamples": { "value": 3, "default": 3 },
+    "mlMinNegativeSamples": { "value": 3, "default": 3 },
+    "debug": { "value": false, "default": false }
+  },
+  "data": {
+    "badSamples": [],
+    "goodSamples": [],
+    "trainingData": [],
+    "followedHandles": [],
+    "modelState": {},
+    "accountCache": {},
+    "handleReputation": {}
+  }
+}

@@ -124,18 +124,59 @@ function syncStatus(msg, type) {
 }
 
 async function loadSyncSettings() {
-  const res = await chrome.storage.local.get(["xls_sync_token", "xls_sync_gist_id"]);
+  const res = await chrome.storage.local.get(["xls_sync_token", "xls_sync_gist_id", "xls_default_rules_url"]);
   const tokenInput = document.getElementById("sync-token");
   const gistInput = document.getElementById("sync-gist-id");
+  const defaultUrlInput = document.getElementById("sync-default-url");
   if (tokenInput && res.xls_sync_token) tokenInput.value = res.xls_sync_token;
   if (gistInput && res.xls_sync_gist_id) gistInput.value = res.xls_sync_gist_id;
+  if (defaultUrlInput) {
+    defaultUrlInput.value = res.xls_default_rules_url || DEFAULT_RULES_URL;
+  }
 }
 
 async function saveSyncSettings() {
   const token = document.getElementById("sync-token").value.trim();
   const gistId = document.getElementById("sync-gist-id").value.trim();
+  const defaultUrl = document.getElementById("sync-default-url").value.trim();
   if (token) await chrome.storage.local.set({ xls_sync_token: token });
   if (gistId) await chrome.storage.local.set({ xls_sync_gist_id: gistId });
+  if (defaultUrl) await chrome.storage.local.set({ xls_default_rules_url: defaultUrl });
+}
+
+const DEFAULT_RULES_URL = "https://raw.githubusercontent.com/acnekot/X-Filter/main/rules.json";
+
+async function doLoadDefaultRules() {
+  let url = document.getElementById("sync-default-url").value.trim();
+  if (!url) url = DEFAULT_RULES_URL;
+  if (!tabId) { syncStatus("请在 x.com 页面使用此功能", "error"); return; }
+
+  await saveSyncSettings();
+  syncStatus("正在下载默认规则…", "loading");
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      syncStatus(`下载失败: HTTP ${res.status} (请确认 rules.json 已推送)`, "error"); return;
+    }
+    const text = await res.text();
+    let payload;
+    try { payload = JSON.parse(text); } catch {
+      syncStatus("规则内容不是有效 JSON", "error"); return;
+    }
+
+    const resp = await sendToContent({ type: "syncImport", payload: payload });
+    if (resp && resp.success) {
+      const now = new Date().toLocaleString();
+      chrome.storage.local.set({ xls_last_default_fetch: Date.now() });
+      syncStatus(`默认规则已加载 (${now})`, "success");
+      setTimeout(refreshStats, 300);
+    } else {
+      syncStatus("合并失败", "error");
+    }
+  } catch (e) {
+    syncStatus(`网络错误: ${e.message}`, "error");
+  }
 }
 
 async function doSyncPush() {
@@ -265,6 +306,19 @@ async function doImportFromUrl() {
 }
 
 // ============================================================
+//  首次安装检测
+// ============================================================
+async function checkAndOfferDefaults() {
+  const res = await chrome.storage.local.get(["xls_samplesBad_v4", "xls_last_default_fetch"]);
+  const bad = res["xls_samplesBad_v4"];
+  if (!bad || bad.length === 0) {
+    if (!res["xls_last_default_fetch"]) {
+      syncStatus("首次使用：点击「加载默认规则」获取最新规则列表", "");
+    }
+  }
+}
+
+// ============================================================
 //  入口
 // ============================================================
 document.addEventListener("DOMContentLoaded", async () => {
@@ -275,6 +329,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (tabId) {
     refreshStats();
     document.getElementById("sync-info").textContent = "纯本地自学习过滤器";
+    checkAndOfferDefaults();
   } else {
     document.getElementById("sync-info").textContent = "请打开 x.com 使用";
   }
@@ -380,6 +435,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Sync buttons
+  document.getElementById("sync-load-default").addEventListener("click", doLoadDefaultRules);
   document.getElementById("sync-load-url").addEventListener("click", doImportFromUrl);
   document.getElementById("sync-push").addEventListener("click", doSyncPush);
   document.getElementById("sync-pull").addEventListener("click", doSyncPull);
@@ -387,4 +443,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Save sync settings on input change
   document.getElementById("sync-token").addEventListener("change", saveSyncSettings);
   document.getElementById("sync-gist-id").addEventListener("change", saveSyncSettings);
+  document.getElementById("sync-default-url").addEventListener("change", saveSyncSettings);
 });
