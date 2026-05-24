@@ -125,6 +125,7 @@
       <div class="actions">
         <button class="btn" id="action-export">导出 JSON</button>
         <button class="btn" id="action-import">导入 JSON</button>
+        <input type="file" id="import-file" accept=".json" style="display:none">
         <button class="btn" id="action-retrain">重新训练 ML</button>
         <button class="btn danger" id="action-clear">清空学习数据</button>
         <button class="btn danger" id="action-cfol">清空关注缓存</button>
@@ -145,6 +146,7 @@
         <button class="btn sync-btn" id="sync-load-url">从 URL 导入</button>
       </div>
       <div class="sync-divider">— GitHub Gist 同步 —</div>
+      <div class="sync-hint">Token 以明文存储在本地，建议仅授予 Gist 权限</div>
       <div class="sync-row">
         <input type="password" class="sync-input" id="sync-token" placeholder="GitHub Personal Access Token">
       </div>

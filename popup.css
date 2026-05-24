@@ -7,7 +7,7 @@ body {
   color: #e7e9ea;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .header {
@@ -207,6 +207,12 @@ body {
   font-size: 10px;
   color: #536471;
   margin: 6px 0;
+}
+.sync-hint {
+  font-size: 10px;
+  color: #f4212e;
+  opacity: 0.7;
+  margin-bottom: 4px;
 }
 .sync-actions {
   display: flex;

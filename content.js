@@ -194,6 +194,16 @@ function addSample(key, fingerprint, rawPreview) {
   return true;
 }
 
+function removeSample(key, fingerprint) {
+  const sig = normalizeText(fingerprint).slice(0, 120);
+  const arr = key === KEY_BAD ? memBad : memGood;
+  const idx = arr.findIndex(x => x.sig === sig);
+  if (idx === -1) return false;
+  arr.splice(idx, 1);
+  saveArr(key, arr);
+  return true;
+}
+
 // ============================================================
 //  NLP 工具：字符熵、文本重复度
 // ============================================================
@@ -627,12 +637,21 @@ function retrainModel(silent = false) {
   if (!silent) alert(`重新训练完成。样本 ${memTrain.length}（垃圾 ${posCount} / 正常 ${negCount}），轮次 5。`);
 }
 
+let _retrainTimer = null;
+function scheduleRetrain() {
+  if (_retrainTimer) clearTimeout(_retrainTimer);
+  _retrainTimer = setTimeout(() => {
+    _retrainTimer = null;
+    if (hasEnoughMlTraining()) retrainModel(true);
+    else saveModelState();
+  }, 2000);
+}
+
 function learnFromLabel(features, label, rawData) {
   if (!features || !cfg.mlEnabled) return;
   saveTrainExample(features, label, rawData);
   updateHandleRep(rawData.handle, label);
-  if (hasEnoughMlTraining()) retrainModel(true);
-  else saveModelState();
+  scheduleRetrain();
 }
 
 // ============================================================
@@ -751,6 +770,7 @@ function mergeAccountCache(existing, incoming) {
 function importData(pastedJson) {
   let data;
   if (pastedJson !== undefined) {
+    if (pastedJson.length > 10 * 1024 * 1024) { alert("数据过大（>10MB）"); return; }
     try { data = JSON.parse(pastedJson); } catch { alert("解析失败：不是合法 JSON"); return; }
   } else {
     const json = prompt("把导出的 JSON 粘贴到这里（会合并去重）");
@@ -801,7 +821,7 @@ function importData(pastedJson) {
   storageSet(KEY_ACCT, memAcct);
 
   if (trainData && trainData.length) {
-    retrainModel();
+    setTimeout(() => retrainModel(true), 100);
   }
 
   const c = getTrainCounts();
@@ -817,29 +837,26 @@ function importData(pastedJson) {
   alert(msg);
 }
 
-function clearSamples() {
-  if (!confirm("确认清空学习样本（垃圾/正常 + ML 训练数据 + 模型权重）？")) return;
+function clearSamples(skipConfirm) {
+  if (!skipConfirm && !confirm("确认清空学习样本（垃圾/正常 + ML 训练数据 + 模型权重）？")) return;
   memBad = []; memGood = []; memTrain = [];
   saveArr(KEY_BAD, []); saveArr(KEY_GOOD, []); saveArr(KEY_TRAIN, []);
   model = new OnlineLR(FEATURE_COUNT, cfg.mlLearningRate, cfg.mlL2);
   saveModelState();
   memHRep = {};
   saveObj(KEY_HREP, {});
-  alert("已清空所有学习数据和 ML 模型。");
 }
 
-function clearFollowed() {
-  if (!confirm("确认清空已关注缓存？")) return;
+function clearFollowed(skipConfirm) {
+  if (!skipConfirm && !confirm("确认清空已关注缓存？")) return;
   memFollowed = new Set();
   saveArr(KEY_FOLLOWED, []);
-  alert("已清空已关注缓存。");
 }
 
-function clearAccountCache() {
-  if (!confirm("确认清空账号特征缓存？")) return;
+function clearAccountCache(skipConfirm) {
+  if (!skipConfirm && !confirm("确认清空账号特征缓存？")) return;
   memAcct = {};
   storageSet(KEY_ACCT, {});
-  alert("已清空账号缓存。");
 }
 
 // ============================================================
@@ -1090,6 +1107,15 @@ function extractAccountFromCard(card) {
   return info;
 }
 
+let _acctSaveTimer = null;
+function scheduleAcctSave() {
+  if (_acctSaveTimer) return;
+  _acctSaveTimer = setTimeout(() => {
+    _acctSaveTimer = null;
+    storageSet(KEY_ACCT, memAcct);
+  }, 3000);
+}
+
 function detectFollowedFromHoverCard(root) {
   const cards = (root || document).querySelectorAll(
     '[data-testid="HoverCard"], [data-testid="UserHoverCard"], [role="dialog"]'
@@ -1099,7 +1125,7 @@ function detectFollowedFromHoverCard(root) {
     if (!info || !info.handle) continue;
 
     memAcct[info.handle] = info;
-    storageSet(KEY_ACCT, memAcct);
+    scheduleAcctSave();
 
     if (!cfg.followedByHover) continue;
     const btns = card.querySelectorAll("button");
@@ -1203,6 +1229,7 @@ function blockFold(article, sim, where, reasonText) {
 
   goodBtn.addEventListener("click", (e) => {
     e.preventDefault(); e.stopPropagation();
+    removeSample(KEY_BAD, pack.fingerprint);
     const ok = addSample(KEY_GOOD, pack.fingerprint, pack.preview);
 
     if (features && cfg.mlEnabled) {
@@ -1428,14 +1455,27 @@ function scan(root) {
   for (const a of arts) processArticle(a);
 }
 
+let _scanPending = false;
+let _pendingNodes = [];
+
 const mo = new MutationObserver((mutations) => {
   for (const m of mutations) {
     for (const node of m.addedNodes) {
       if (!(node instanceof HTMLElement)) continue;
-      detectFollowedFromHoverCard(node);
-      if (node.tagName === "ARTICLE") processArticle(node);
-      else scan(node);
+      _pendingNodes.push(node);
     }
+  }
+  if (!_scanPending) {
+    _scanPending = true;
+    requestAnimationFrame(() => {
+      _scanPending = false;
+      const nodes = _pendingNodes.splice(0);
+      for (const node of nodes) {
+        detectFollowedFromHoverCard(node);
+        if (node.tagName === "ARTICLE") processArticle(node);
+        else scan(node);
+      }
+    });
   }
 });
 
@@ -1696,9 +1736,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "export": exportData(); break;
       case "import": if (message.data) importData(message.data); break;
       case "retrain": retrainModel(); break;
-      case "clearSamples": clearSamples(); break;
-      case "clearFollowed": clearFollowed(); break;
-      case "clearAccounts": clearAccountCache(); break;
+      case "clearSamples": clearSamples(true); break;
+      case "clearFollowed": clearFollowed(true); break;
+      case "clearAccounts": clearAccountCache(true); break;
     }
     return false;
   }

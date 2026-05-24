@@ -334,7 +334,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("sync-info").textContent = "纯本地自学习过滤器";
     checkAndOfferDefaults();
   } else {
-    // not on x.com
+    document.getElementById("sync-info").textContent = "仅在 x.com / twitter.com 页面上生效";
   }
 
   document.querySelectorAll(".toggle").forEach(el => {
@@ -405,11 +405,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  document.getElementById("action-import").addEventListener("click", async () => {
-    const json = prompt("把导出的 JSON 粘贴到这里（会合并去重）");
-    if (!json) return;
+  document.getElementById("action-import").addEventListener("click", () => {
+    document.getElementById("import-file").click();
+  });
+
+  document.getElementById("import-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert("文件过大（>10MB），请检查后重试。");
+      return;
+    }
+    const text = await file.text();
+    e.target.value = "";
     if (tabId) {
-      sendToContent({ type: "action", action: "import", data: json });
+      sendToContent({ type: "action", action: "import", data: text });
       setTimeout(refreshStats, 500);
     }
   });
