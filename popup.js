@@ -97,7 +97,8 @@ async function refreshStats() {
     const statusEl = document.getElementById("stats-status");
     if (statusEl) {
       const dot = stats.mlActive ? "active" : "inactive";
-      statusEl.innerHTML = `<span class="status-dot ${dot}"></span>${stats.mlActive ? "ML 已激活" : "等正/负样本"}`;
+      statusEl.replaceChildren();
+      statusEl.insertAdjacentHTML("afterbegin", `<span class="status-dot ${dot}"></span>${stats.mlActive ? "ML 已激活" : "等正/负样本"}`);
     }
   } catch (e) {
     // tab might not have content script loaded

@@ -1157,7 +1157,7 @@ function blockFold(article, sim, where, reasonText) {
   const channelLabel = channelMap[where] || where;
   const scoreLabel = sim != null ? sim.toFixed(2) : "—";
 
-  card.innerHTML = `
+  card.insertAdjacentHTML("afterbegin", `
     <div class="xls-row">
       <div class="xls-title">已屏蔽：疑似垃圾</div>
       <div class="xls-meta">${channelLabel} ${scoreLabel}</div>
@@ -1168,7 +1168,7 @@ function blockFold(article, sim, where, reasonText) {
       <button class="xls-btn xls-mark-good" type="button">标注：正常</button>
     </div>
     <div class="xls-reason"></div>
-  `;
+  `);
   card.querySelector(".xls-preview").textContent = preview;
   card.querySelector(".xls-reason").textContent =
     reasonText ? `${reasonText}` : `提示：误伤时点「标注：正常」`;
@@ -1220,10 +1220,10 @@ function injectMarkButtons(article) {
 
   const bar = document.createElement("div");
   bar.className = "xls-inline-actions";
-  bar.innerHTML = `
+  bar.insertAdjacentHTML("afterbegin", `
     <button class="xls-mini xls-mini-bad" type="button">标注垃圾</button>
     <button class="xls-mini xls-mini-good" type="button">标注正常</button>
-  `;
+  `);
 
   bar.querySelector(".xls-mini-bad").addEventListener("click", (e) => {
     e.preventDefault(); e.stopPropagation();
@@ -1437,7 +1437,7 @@ function createControlPanel() {
   fab.addEventListener("click", show);
   bd.addEventListener("click", hide);
 
-  cp.innerHTML = `
+  cp.insertAdjacentHTML("afterbegin", `
 <div class="xls-cp-hd"><span>X-Filter v1.0.1</span><button class="xls-cp-x">&times;</button></div>
 <div class="xls-cp-bd">
 
@@ -1500,7 +1500,7 @@ function createControlPanel() {
     </div>
   </div>
 
-</div>`;
+</div>`);
 
   cp.querySelector(".xls-cp-x").addEventListener("click", hide);
 
@@ -1547,7 +1547,8 @@ function createControlPanel() {
     const ms = model.getState();
     const c = getTrainCounts();
     const active = cfg.mlEnabled && hasEnoughMlTraining();
-    el.innerHTML = `
+    el.replaceChildren();
+    el.insertAdjacentHTML("afterbegin", `
       <span>垃圾样本</span><span class="xls-sv">${memBad.length}</span>
       <span>正常样本</span><span class="xls-sv">${memGood.length}</span>
       <span>ML 训练数据</span><span class="xls-sv">${memTrain.length}</span>
@@ -1557,7 +1558,7 @@ function createControlPanel() {
       <span>已关注缓存</span><span class="xls-sv">${memFollowed.size}</span>
       <span>账号缓存</span><span class="xls-sv">${Object.keys(memAcct).length}</span>
       <span>Handle 声誉</span><span class="xls-sv">${Object.keys(memHRep).length}</span>
-    `;
+    `);
   }
 
   document.body.append(fab, bd, cp);
