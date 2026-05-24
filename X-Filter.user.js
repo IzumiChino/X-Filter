@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X-filter
 // @namespace    https://tampermonkey.net/
-// @version      5.1.0
-// @description  内置轻量在线逻辑回归分类器，从用户标注学习"文本特征+账号特征"联合判定垃圾；Jaccard 相似度作为特征之一；结构通道处理 emoji/digits-only；加入中文误伤保护与风险词锚点；支持标记模式、折叠/隐藏、导入导出；关注免屏蔽
+// @version      5.2.0
+// @description  内置轻量在线逻辑回归分类器，从用户标注学习"文本特征+账号特征"联合判定垃圾；Jaccard 相似度作为特征之一；结构通道处理 emoji/digits-only；加入中文误伤保护、风险词锚点与软诱导组合判定；支持标记模式、折叠/隐藏、导入导出；关注免屏蔽
 // @author       好奇猫a & Izumi Chino
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -41,6 +41,10 @@
     heuristicThresholdReply: 0.40,
     heuristicThresholdTimeline: 0.70,
 
+    softBaitChannel: true,
+    softBaitThresholdReply: 0.62,
+    softBaitThresholdTimeline: 0.88,
+
     mlEnabled: true,
     mlMinSamples: 8,
     mlThresholdReply: 0.55,
@@ -73,7 +77,7 @@
     cfg[k] = GM_getValue(k, DEFAULT[k]);
   }
 
-  const log = (...a) => cfg.debug && console.log("[X ML-Shield v5.1]", ...a);
+  const log = (...a) => cfg.debug && console.log("[X ML-Shield v5.2]", ...a);
 
   // ============================================================
   //  存储 + 内存缓存
@@ -281,6 +285,7 @@
     const sex = /(?:约炮|约啪|约p|包夜|上门服务|外约|裸聊|全套|外围|陪睡|学生妹|成人视频|无码视频|开房|一夜情|同城约|附近妹)/i.test(compact) ? 1 : 0;
     const fraud = /(?:刷单返利|返利群|提现异常|稳赚|日结兼职|无抵押贷款|刷流水|博彩|杀猪盘|送彩金|代投|开户链接|高收益|带单|资金盘|虚拟币搬砖|usdt搬砖)/i.test(compact) ? 1 : 0;
     const money = /(?:¥|￥|\$|\d+(?:\.\d+)?(?:w|W|万|k|K|元|块|刀|美元|usdt|USDT))/i.test(raw) ? 1 : 0;
+    const softBait = computeSoftBaitSignal(raw, compact);
     const rep = textRepetition(raw);
 
     const riskScore = Math.min(
@@ -308,9 +313,79 @@
       sex,
       fraud,
       money,
+      softBait: softBait.score,
+      softBaitHits: softBait.hits,
       rep,
       riskScore,
       hasStrongAnchor: riskScore >= 0.35,
+    };
+  }
+
+  function computeSoftBaitSignal(raw, compact) {
+    const hits = [];
+    const add = (name, re) => {
+      if (re.test(compact)) hits.push(name);
+    };
+
+    add("affection", /(?:想被爱|缺爱|没人爱|求抱抱|想要抱抱|需要抱抱|抱抱我|哄哄我)/i);
+    add("lonely", /(?:好孤独|好寂寞|没人陪|陪陪我|找人陪|一个人好难过|睡不着|失眠了)/i);
+    add("breakup", /(?:刚分手|分手了|失恋了|被甩了|前任|单身了)/i);
+    add("chat", /(?:想聊天|找人聊天|有人聊天吗|谁来聊天|来个人聊天|私聊我|私信我|dm我)/i);
+    add("flirt", /(?:哥哥在吗|姐姐在吗|宝贝在吗|有人要我吗|想谈恋爱|想找对象|想被宠|想被疼)/i);
+
+    const len = (raw || "").trim().length;
+    const emojiN = countEmoji(raw);
+    const emojiRatio = len > 0 ? emojiN / len : 0;
+    const laugh = /(?:哈){3,}|(?:hhh){2,}|(?:lol){2,}/i.test(compact) ? 1 : 0;
+    const questionish = /[?？]/.test(raw) || /(?:吗|嘛|呢|呀|啦)$/.test(compact) ? 1 : 0;
+
+    let score = Math.min(hits.length, 3) * 0.18;
+    if (len > 0 && len <= 36) score += 0.10;
+    if (emojiN >= 2) score += 0.08;
+    if (emojiRatio >= 0.12) score += 0.06;
+    if (laugh) score += 0.04;
+    if (questionish) score += 0.04;
+
+    return { score: Math.min(score, 0.58), hits };
+  }
+
+  function accountSuspicionProfile(handle, name) {
+    const hClean = (handle || "").replace(/^@/, "");
+    const hLen = hClean.length;
+    const hDigits = hClean.replace(/\D/g, "").length;
+    const hDigitRatio = hLen > 0 ? hDigits / hLen : 0;
+    const trailingSeq = (hClean.match(/\d+$/) || [""])[0];
+    const trailingDigits = trailingSeq.length;
+    const hasYearSuffix = /^(?:19|20)\d{2}$/.test(trailingSeq);
+    const generated =
+      (!hasYearSuffix && /^[a-z]{1,7}\d{4,}$/i.test(hClean)) ||
+      /^[a-z]{1,4}_[a-z]{1,6}\d{4,}$/i.test(hClean) ||
+      /^[a-z]+[a-z]\d{5,}$/i.test(hClean);
+    const nameEmojiRatio = name ? countEmoji(name) / Math.max(name.length, 1) : 0;
+
+    let score = 0;
+    const parts = [];
+
+    if (hDigitRatio >= 0.50 && hDigits >= 4) { score += 0.30; parts.push("handle 高数字比"); }
+    else if (hDigitRatio >= 0.35 && hDigits >= 3) { score += 0.15; parts.push("handle 数字比偏高"); }
+
+    if (trailingDigits >= 6) { score += 0.20; parts.push("handle 尾部长数字串"); }
+    else if (trailingDigits >= 4 && !hasYearSuffix) { score += 0.10; parts.push("handle 尾部数字"); }
+    else if (trailingDigits >= 4) { score += 0.03; parts.push("handle 年份尾号"); }
+
+    if (generated) { score += 0.20; parts.push("handle 疑似自动生成"); }
+    if (hLen > 14 && charEntropy(hClean) > 3.2) { score += 0.10; parts.push("handle 高随机度"); }
+    if (nameEmojiRatio > 0.30 && countEmoji(name) >= 2) { score += 0.08; parts.push("名字 emoji 偏多"); }
+
+    return {
+      score: Math.min(score, 0.65),
+      parts,
+      hLen,
+      hDigits,
+      hDigitRatio,
+      trailingDigits,
+      hasYearSuffix,
+      generated,
     };
   }
 
@@ -421,7 +496,7 @@
   // ============================================================
   //  在线逻辑回归 (Online Logistic Regression)
   // ============================================================
-  const BASE_FEATURE_COUNT = 28;
+  const BASE_FEATURE_COUNT = 31;
   const HASH_DIM = 256;
   const FEATURE_COUNT = BASE_FEATURE_COUNT + HASH_DIM;
 
@@ -475,7 +550,7 @@
     }
   }
 
-  const FEATURE_VERSION = 3;
+  const FEATURE_VERSION = 4;
 
   let model = new OnlineLR(FEATURE_COUNT, cfg.mlLearningRate, cfg.mlL2);
   const savedModel = GM_getValue(KEY_MODEL, null);
@@ -557,7 +632,7 @@
   }
 
   // ============================================================
-  //  特征提取  (28 维 + hashing trick, 全部归一化到 ~0-1)
+  //  特征提取  (31 维 + hashing trick, 全部归一化到 ~0-1)
   // ============================================================
   //  0  bias               1
   //  1  textLen             log(1+len)/7
@@ -587,10 +662,14 @@
   // 25  fraudSignal         诈骗/返利/博彩/贷款等锚点
   // 26  mixedScript         中英混排比例
   // 27  strongRiskAnchor    明确风险锚点
+  // 28  softBaitSignal      情感/暧昧软诱导弱信号
+  // 29  accountSuspicion    handle/name 可疑度
+  // 30  softBaitCombo       软诱导 + 账号/场景组合信号
 
   function computeFeatures({ text, handle, name, isReply, hasMedia }) {
     const hClean = (handle || "").replace(/^@/, "");
     const risk = textRiskProfile(text);
+    const acctSus = accountSuspicionProfile(handle, name);
 
     const tLen = (text || "").length;
     const eN = countEmoji(text);
@@ -634,6 +713,9 @@
       risk.fraud,
       risk.mixedScript,
       risk.hasStrongAnchor ? 1 : 0,
+      risk.softBait,
+      acctSus.score,
+      Math.min(1, risk.softBait + acctSus.score + (isReply ? 0.10 : 0)),
     ];
 
     const hashed = hashNgramFeatures(text, handle, name, risk);
@@ -1020,29 +1102,9 @@
     const parts = [];
 
     // --- 账号维度 ---
-    const hLen = hClean.length;
-    const hDigits = hClean.replace(/\D/g, "").length;
-    const hDigitR = hLen > 0 ? hDigits / hLen : 0;
-
-    if (hDigitR >= 0.5 && hDigits >= 4) {
-      score += 0.30; parts.push("handle 高数字比");
-    } else if (hDigitR >= 0.35 && hDigits >= 3) {
-      score += 0.15; parts.push("handle 数字比偏高");
-    }
-
-    if (/\d{6,}$/.test(hClean)) {
-      score += 0.20; parts.push("handle 尾部长数字串");
-    } else if (/\d{4,5}$/.test(hClean)) {
-      score += 0.10; parts.push("handle 尾部数字");
-    }
-
-    if (/^[a-z]{1,5}\d{6,}$/i.test(hClean) || /^[a-z]{1,4}_[a-z]{1,4}\d{5,}$/i.test(hClean)) {
-      score += 0.20; parts.push("handle 疑似自动生成");
-    }
-
-    if (hLen > 14 && charEntropy(hClean) > 3.2) {
-      score += 0.10; parts.push("handle 高随机度");
-    }
+    const acctSus = accountSuspicionProfile(handle, name);
+    score += acctSus.score;
+    parts.push(...acctSus.parts);
 
     // --- 内容维度 ---
     const tLen = (text || "").length;
@@ -1102,6 +1164,44 @@
       return { hit: true, score, reason: parts.join(" + ") };
     }
     return { hit: false, score };
+  }
+
+  function softBaitDecision({ text, handle, name, risk, ctxBoost, replyMode }) {
+    if (!cfg.softBaitChannel) return { hit: false, score: 0 };
+    if (!risk || risk.hasStrongAnchor || risk.softBait <= 0) return { hit: false, score: 0 };
+
+    const acctSus = accountSuspicionProfile(handle, name);
+    const len = (text || "").trim().length;
+    const emojiN = countEmoji(text);
+    const shortText = len > 0 && len <= 36;
+
+    let score = 0;
+    const parts = [];
+
+    score += risk.softBait;
+    parts.push(`软诱导${risk.softBait.toFixed(2)}`);
+
+    if (replyMode) { score += 0.12; parts.push("回复区"); }
+    if (shortText) { score += 0.08; parts.push("短文本"); }
+    if (emojiN >= 2) { score += 0.06; parts.push("emoji"); }
+
+    if (acctSus.score > 0) {
+      score += Math.min(acctSus.score, 0.35);
+      parts.push(...acctSus.parts);
+    }
+
+    if (ctxBoost >= 0.10) { score += 0.12; parts.push("跨账号相似"); }
+    else if (ctxBoost >= 0.06) { score += 0.06; parts.push("上下文相似"); }
+
+    const acctGate = acctSus.score >= 0.20;
+    const contextGate = replyMode || ctxBoost >= 0.06;
+    const formatGate = shortText || emojiN >= 2;
+    const th = replyMode ? cfg.softBaitThresholdReply : cfg.softBaitThresholdTimeline;
+
+    if (acctGate && contextGate && formatGate && score >= th) {
+      return { hit: true, score, reason: parts.join(" + ") };
+    }
+    return { hit: false, score, reason: parts.join(" + ") };
   }
 
   // ============================================================
@@ -1220,7 +1320,7 @@
     const card = document.createElement("div");
     card.className = "xls-card";
 
-    const channelMap = { struct: "结构", heuristic: "启发式", ml: "ML", reply: "Jaccard", timeline: "Jaccard", manual: "手动" };
+    const channelMap = { struct: "结构", heuristic: "启发式", softbait: "软诱导", ml: "ML", reply: "Jaccard", timeline: "Jaccard", manual: "手动" };
     const channelLabel = channelMap[where] || where;
     const scoreLabel = sim != null ? sim.toFixed(2) : "—";
 
@@ -1371,6 +1471,14 @@
     const replyMode = inReplyContext();
     const cjkProtection = getCjkProtectionLevel(risk, replyMode);
     const h = heuristicDecision(article);
+    const sb = softBaitDecision({
+      text: pack.text,
+      handle,
+      name: pack.name,
+      risk,
+      ctxBoost,
+      replyMode,
+    });
     const mlActive = cfg.mlEnabled && hasEnoughMlTraining();
     let mlRaw = null, mlTh = null, features = null;
 
@@ -1385,10 +1493,19 @@
     logParts.push(`handle=${handle}`);
     logParts.push(`reply=${replyMode}`);
     if (risk.riskScore > 0) logParts.push(`risk=${risk.riskScore.toFixed(2)}`);
+    if (risk.softBait > 0) logParts.push(`soft=${risk.softBait.toFixed(2)}(${sb.hit ? "HIT" : "miss"}${sb.reason ? ": " + sb.reason : ""})`);
     if (cjkProtection > 0) logParts.push(`cjk_guard=+${cjkProtection.toFixed(2)}`);
     if (h.score > 0) logParts.push(`heur=${h.score.toFixed(2)}(${h.hit ? "HIT" : "miss"}${h.reason ? ": " + h.reason : ""})`);
     if (mlActive) logParts.push(`ml_raw=${mlRaw.toFixed(3)} th=${mlTh}`);
     if (ctxBoost > 0) logParts.push(`ctx_boost=${ctxBoost.toFixed(2)}`);
+
+    if (sb.hit) {
+      log(`[BLOCK] ${logParts.join(" | ")} | 决策=软诱导组合 | "${textPreview}"`);
+      return {
+        block: true, sim: sb.score, where: "softbait",
+        reasonText: `软诱导组合 (${sb.reason})`,
+      };
+    }
 
     if (h.hit) {
       if (cjkProtection > 0 && h.score < (replyMode ? 0.75 : 0.85)) {
@@ -1533,7 +1650,7 @@
       .join("\n");
 
     alert(
-      `=== X ML-Shield v5.1 ===\n` +
+      `=== X ML-Shield v5.2 ===\n` +
       `垃圾样本：${memBad.length}  正常样本：${memGood.length}\n` +
       `ML 训练数据：${memTrain.length}（垃圾 ${c.pos} / 正常 ${c.neg}）  训练次数：${s.n}\n` +
       `已关注缓存：${memFollowed.size}\n` +
@@ -1672,7 +1789,7 @@
     bd.addEventListener("click", hide);
 
     cp.innerHTML = `
-<div class="xls-cp-hd"><span>X ML-Shield v5.1</span><button class="xls-cp-x">&times;</button></div>
+<div class="xls-cp-hd"><span>X ML-Shield v5.2</span><button class="xls-cp-x">&times;</button></div>
 <div class="xls-cp-bd">
 
   <div class="xls-sec">
@@ -1684,6 +1801,7 @@
     </div>
     ${T("mlEnabled", "ML 分类器")}
     ${T("heuristicChannel", "启发式通道（零训练自动拦截）")}
+    ${T("softBaitChannel", "软诱导组合通道")}
     ${T("followedByHover", "关注免屏蔽")}
     ${T("structuralChannel", "结构通道（emoji/digits-only 直杀）")}
     ${T("debug", "调试日志")}
@@ -1700,6 +1818,8 @@
     <div class="xls-sec-t">启发式参数</div>
     ${N("heuristicThresholdReply", "回复区阈值（越低越激进）", 0.15, 0.90, 0.05)}
     ${N("heuristicThresholdTimeline", "时间线阈值", 0.30, 0.95, 0.05)}
+    ${N("softBaitThresholdReply", "软诱导回复区阈值", 0.35, 0.95, 0.05)}
+    ${N("softBaitThresholdTimeline", "软诱导时间线阈值", 0.50, 0.98, 0.05)}
   </div>
 
   <div class="xls-sec">
