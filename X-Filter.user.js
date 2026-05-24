@@ -44,6 +44,9 @@
     softBaitChannel: true,
     softBaitThresholdReply: 0.62,
     softBaitThresholdTimeline: 0.88,
+    lowInfoChannel: true,
+    lowInfoThresholdReply: 0.70,
+    lowInfoThresholdTimeline: 0.92,
 
     mlEnabled: true,
     mlMinSamples: 8,
@@ -286,6 +289,7 @@
     const fraud = /(?:刷单返利|返利群|提现异常|稳赚|日结兼职|无抵押贷款|刷流水|博彩|杀猪盘|送彩金|代投|开户链接|高收益|带单|资金盘|虚拟币搬砖|usdt搬砖)/i.test(compact) ? 1 : 0;
     const money = /(?:¥|￥|\$|\d+(?:\.\d+)?(?:w|W|万|k|K|元|块|刀|美元|usdt|USDT))/i.test(raw) ? 1 : 0;
     const softBait = computeSoftBaitSignal(raw, compact);
+    const lowInfo = computeLowInfoSignal(raw, compact);
     const rep = textRepetition(raw);
 
     const riskScore = Math.min(
@@ -315,6 +319,8 @@
       money,
       softBait: softBait.score,
       softBaitHits: softBait.hits,
+      lowInfo: lowInfo.score,
+      lowInfoHits: lowInfo.hits,
       rep,
       riskScore,
       hasStrongAnchor: riskScore >= 0.35,
@@ -339,6 +345,8 @@
     const laugh = /(?:哈){3,}|(?:hhh){2,}|(?:lol){2,}/i.test(compact) ? 1 : 0;
     const questionish = /[?？]/.test(raw) || /(?:吗|嘛|呢|呀|啦)$/.test(compact) ? 1 : 0;
 
+    if (!hits.length) return { score: 0, hits };
+
     let score = Math.min(hits.length, 3) * 0.18;
     if (len > 0 && len <= 36) score += 0.10;
     if (emojiN >= 2) score += 0.08;
@@ -347,6 +355,39 @@
     if (questionish) score += 0.04;
 
     return { score: Math.min(score, 0.58), hits };
+  }
+
+  function computeLowInfoSignal(raw, compact) {
+    const text = (raw || "").trim();
+    const len = text.length;
+    const hits = [];
+    if (!len) return { score: 0, hits };
+
+    const cjkCount = countMatches(text, /[\u4E00-\u9FFF]/gu);
+    const latinCount = countMatches(text, /[A-Za-z]/g);
+    const emojiN = countEmoji(text);
+    const digitN = countDigits(text);
+    const meaningfulChars = cjkCount + latinCount + digitN;
+    const uniqueRatio = len > 0 ? new Set(text).size / len : 0;
+    const rep = textRepetition(text);
+
+    if (len <= 8) hits.push("极短");
+    else if (len <= 18) hits.push("短文本");
+
+    if (emojiN >= 2) hits.push("多 emoji");
+    if (meaningfulChars > 0 && meaningfulChars <= 4 && len <= 18) hits.push("低文字量");
+    if (rep > 0.45 || uniqueRatio < 0.45) hits.push("重复");
+    if (/^(?:哈哈+|hhh+|笑死|顶|支持|厉害|不错|可以|确实|是的|对的|看看|来了|围观|mark|666|6+|牛+|赞+)$/i.test(compact)) hits.push("模板附和");
+    if (/^(?:[!?？！，。,.~·…\-\s]|\p{Emoji_Presentation})+$/u.test(text)) hits.push("符号表情");
+
+    if (!hits.length) return { score: 0, hits };
+
+    let score = Math.min(hits.length, 4) * 0.12;
+    if (len <= 8) score += 0.08;
+    if (emojiN >= 2 && meaningfulChars <= 8) score += 0.08;
+    if (rep > 0.45) score += 0.06;
+
+    return { score: Math.min(score, 0.56), hits };
   }
 
   function accountSuspicionProfile(handle, name) {
@@ -496,7 +537,7 @@
   // ============================================================
   //  在线逻辑回归 (Online Logistic Regression)
   // ============================================================
-  const BASE_FEATURE_COUNT = 31;
+  const BASE_FEATURE_COUNT = 33;
   const HASH_DIM = 256;
   const FEATURE_COUNT = BASE_FEATURE_COUNT + HASH_DIM;
 
@@ -550,7 +591,7 @@
     }
   }
 
-  const FEATURE_VERSION = 4;
+  const FEATURE_VERSION = 5;
 
   let model = new OnlineLR(FEATURE_COUNT, cfg.mlLearningRate, cfg.mlL2);
   const savedModel = GM_getValue(KEY_MODEL, null);
@@ -632,7 +673,7 @@
   }
 
   // ============================================================
-  //  特征提取  (31 维 + hashing trick, 全部归一化到 ~0-1)
+  //  特征提取  (33 维 + hashing trick, 全部归一化到 ~0-1)
   // ============================================================
   //  0  bias               1
   //  1  textLen             log(1+len)/7
@@ -665,6 +706,8 @@
   // 28  softBaitSignal      情感/暧昧软诱导弱信号
   // 29  accountSuspicion    handle/name 可疑度
   // 30  softBaitCombo       软诱导 + 账号/场景组合信号
+  // 31  lowInfoSignal       低信息量/模板化短回复弱信号
+  // 32  lowInfoCombo        低信息量 + 账号/场景组合信号
 
   function computeFeatures({ text, handle, name, isReply, hasMedia }) {
     const hClean = (handle || "").replace(/^@/, "");
@@ -716,6 +759,8 @@
       risk.softBait,
       acctSus.score,
       Math.min(1, risk.softBait + acctSus.score + (isReply ? 0.10 : 0)),
+      risk.lowInfo,
+      Math.min(1, risk.lowInfo + acctSus.score + (isReply ? 0.10 : 0)),
     ];
 
     const hashed = hashNgramFeatures(text, handle, name, risk);
@@ -1168,7 +1213,7 @@
 
   function softBaitDecision({ text, handle, name, risk, ctxBoost, replyMode }) {
     if (!cfg.softBaitChannel) return { hit: false, score: 0 };
-    if (!risk || risk.hasStrongAnchor || risk.softBait <= 0) return { hit: false, score: 0 };
+    if (!risk || risk.hasStrongAnchor || risk.softBait <= 0 || !risk.softBaitHits.length) return { hit: false, score: 0 };
 
     const acctSus = accountSuspicionProfile(handle, name);
     const len = (text || "").trim().length;
@@ -1199,6 +1244,43 @@
     const th = replyMode ? cfg.softBaitThresholdReply : cfg.softBaitThresholdTimeline;
 
     if (acctGate && contextGate && formatGate && score >= th) {
+      return { hit: true, score, reason: parts.join(" + ") };
+    }
+    return { hit: false, score, reason: parts.join(" + ") };
+  }
+
+  function lowInfoDecision({ text, handle, name, risk, ctxBoost, replyMode }) {
+    if (!cfg.lowInfoChannel) return { hit: false, score: 0 };
+    if (!risk || risk.hasStrongAnchor || risk.lowInfo <= 0 || !risk.lowInfoHits.length) return { hit: false, score: 0 };
+
+    const acctSus = accountSuspicionProfile(handle, name);
+    const len = (text || "").trim().length;
+    const emojiN = countEmoji(text);
+
+    let score = 0;
+    const parts = [];
+
+    score += risk.lowInfo;
+    parts.push(`低信息${risk.lowInfo.toFixed(2)}`);
+
+    if (replyMode) { score += 0.12; parts.push("回复区"); }
+    if (len > 0 && len <= 18) { score += 0.08; parts.push("短文本"); }
+    if (emojiN >= 2) { score += 0.05; parts.push("emoji"); }
+
+    if (acctSus.score > 0) {
+      score += Math.min(acctSus.score, 0.35);
+      parts.push(...acctSus.parts);
+    }
+
+    if (ctxBoost >= 0.10) { score += 0.14; parts.push("跨账号相似"); }
+    else if (ctxBoost >= 0.06) { score += 0.07; parts.push("上下文相似"); }
+
+    const acctGate = acctSus.score >= 0.25;
+    const contextGate = replyMode || ctxBoost >= 0.06;
+    const repeatGate = ctxBoost >= 0.06 || risk.lowInfoHits.includes("模板附和") || risk.lowInfoHits.includes("符号表情") || risk.lowInfoHits.includes("重复");
+    const th = replyMode ? cfg.lowInfoThresholdReply : cfg.lowInfoThresholdTimeline;
+
+    if (acctGate && contextGate && repeatGate && score >= th) {
       return { hit: true, score, reason: parts.join(" + ") };
     }
     return { hit: false, score, reason: parts.join(" + ") };
@@ -1320,7 +1402,7 @@
     const card = document.createElement("div");
     card.className = "xls-card";
 
-    const channelMap = { struct: "结构", heuristic: "启发式", softbait: "软诱导", ml: "ML", reply: "Jaccard", timeline: "Jaccard", manual: "手动" };
+    const channelMap = { struct: "结构", heuristic: "启发式", softbait: "软诱导", lowinfo: "低信息", ml: "ML", reply: "Jaccard", timeline: "Jaccard", manual: "手动" };
     const channelLabel = channelMap[where] || where;
     const scoreLabel = sim != null ? sim.toFixed(2) : "—";
 
@@ -1479,6 +1561,14 @@
       ctxBoost,
       replyMode,
     });
+    const li = lowInfoDecision({
+      text: pack.text,
+      handle,
+      name: pack.name,
+      risk,
+      ctxBoost,
+      replyMode,
+    });
     const mlActive = cfg.mlEnabled && hasEnoughMlTraining();
     let mlRaw = null, mlTh = null, features = null;
 
@@ -1494,6 +1584,7 @@
     logParts.push(`reply=${replyMode}`);
     if (risk.riskScore > 0) logParts.push(`risk=${risk.riskScore.toFixed(2)}`);
     if (risk.softBait > 0) logParts.push(`soft=${risk.softBait.toFixed(2)}(${sb.hit ? "HIT" : "miss"}${sb.reason ? ": " + sb.reason : ""})`);
+    if (risk.lowInfo > 0) logParts.push(`lowinfo=${risk.lowInfo.toFixed(2)}(${li.hit ? "HIT" : "miss"}${li.reason ? ": " + li.reason : ""})`);
     if (cjkProtection > 0) logParts.push(`cjk_guard=+${cjkProtection.toFixed(2)}`);
     if (h.score > 0) logParts.push(`heur=${h.score.toFixed(2)}(${h.hit ? "HIT" : "miss"}${h.reason ? ": " + h.reason : ""})`);
     if (mlActive) logParts.push(`ml_raw=${mlRaw.toFixed(3)} th=${mlTh}`);
@@ -1504,6 +1595,14 @@
       return {
         block: true, sim: sb.score, where: "softbait",
         reasonText: `软诱导组合 (${sb.reason})`,
+      };
+    }
+
+    if (li.hit) {
+      log(`[BLOCK] ${logParts.join(" | ")} | 决策=低信息组合 | "${textPreview}"`);
+      return {
+        block: true, sim: li.score, where: "lowinfo",
+        reasonText: `低信息组合 (${li.reason})`,
       };
     }
 
@@ -1802,6 +1901,7 @@
     ${T("mlEnabled", "ML 分类器")}
     ${T("heuristicChannel", "启发式通道（零训练自动拦截）")}
     ${T("softBaitChannel", "软诱导组合通道")}
+    ${T("lowInfoChannel", "低信息短回复组合通道")}
     ${T("followedByHover", "关注免屏蔽")}
     ${T("structuralChannel", "结构通道（emoji/digits-only 直杀）")}
     ${T("debug", "调试日志")}
@@ -1820,6 +1920,8 @@
     ${N("heuristicThresholdTimeline", "时间线阈值", 0.30, 0.95, 0.05)}
     ${N("softBaitThresholdReply", "软诱导回复区阈值", 0.35, 0.95, 0.05)}
     ${N("softBaitThresholdTimeline", "软诱导时间线阈值", 0.50, 0.98, 0.05)}
+    ${N("lowInfoThresholdReply", "低信息回复区阈值", 0.45, 0.98, 0.05)}
+    ${N("lowInfoThresholdTimeline", "低信息时间线阈值", 0.60, 0.99, 0.05)}
   </div>
 
   <div class="xls-sec">
