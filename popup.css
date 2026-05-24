@@ -222,3 +222,25 @@ body {
 .sync-status.success { color: #00ba7c; }
 .sync-status.error { color: #f4212e; }
 .sync-status.loading { color: #1d9bf0; }
+
+/* — About section — */
+.about-text {
+  font-size: 12px;
+  color: #e7e9ea;
+  line-height: 1.5;
+}
+.about-links {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #71767b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.about-link {
+  color: #1d9bf0;
+  text-decoration: none;
+}
+.about-link:hover {
+  text-decoration: underline;
+}
