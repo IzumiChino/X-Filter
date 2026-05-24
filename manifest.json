@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X-Filter",
-  "version": "5.1.0",
+  "version": "1.0.1_extension",
   "description": "内置轻量在线逻辑回归分类器，从用户标注学习文本+账号特征联合判定垃圾推文",
   "author": "好奇猫a & Izumi Chino",
   "permissions": ["storage"],

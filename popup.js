@@ -331,7 +331,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("sync-info").textContent = "纯本地自学习过滤器";
     checkAndOfferDefaults();
   } else {
-    document.getElementById("sync-info").textContent = "请打开 x.com 使用";
+    // not on x.com
   }
 
   document.querySelectorAll(".toggle").forEach(el => {

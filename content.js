@@ -1438,7 +1438,7 @@ function createControlPanel() {
   bd.addEventListener("click", hide);
 
   cp.innerHTML = `
-<div class="xls-cp-hd"><span>X-Filter v5.1.0</span><button class="xls-cp-x">&times;</button></div>
+<div class="xls-cp-hd"><span>X-Filter v1.0.1</span><button class="xls-cp-x">&times;</button></div>
 <div class="xls-cp-bd">
 
   <div class="xls-sec">
@@ -1572,7 +1572,7 @@ async function start() {
   for (const k of configKeys) {
     cfg[k] = configResult[k] !== undefined ? configResult[k] : DEFAULT[k];
   }
-  log = (...a) => cfg.debug && console.log("[X-Filter v5.1]", ...a);
+  log = (...a) => cfg.debug && console.log("[X-Filter v1.0.1]", ...a);
 
   const dataKeys = [KEY_BAD, KEY_GOOD, KEY_FOLLOWED, KEY_TRAIN, KEY_HREP, KEY_ACCT, KEY_MODEL];
   const data = await chrome.storage.local.get(dataKeys);
@@ -1643,7 +1643,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.key && message.value !== undefined) {
       cfg[message.key] = message.value;
       if (message.key === "debug") {
-        log = (...a) => cfg.debug && console.log("[X-Filter v5.1]", ...a);
+        log = (...a) => cfg.debug && console.log("[X-Filter v1.0.1]", ...a);
       }
     } else {
       const configKeys = Object.keys(DEFAULT);
@@ -1651,7 +1651,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         for (const k of configKeys) {
           if (result[k] !== undefined) cfg[k] = result[k];
         }
-        log = (...a) => cfg.debug && console.log("[X-Filter v5.1]", ...a);
+        log = (...a) => cfg.debug && console.log("[X-Filter v1.0.1]", ...a);
       });
     }
     return false;
