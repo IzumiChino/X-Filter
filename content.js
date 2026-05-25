@@ -135,9 +135,18 @@ function toast(msg) {
 // ============================================================
 function normalizeText(s) {
   return (s || "")
+    // 1. 去除零宽字符、不可见格式字符
+    .replace(/[​-‏‪-‮⁠-⁯﻿­͏]/g, "")
+    // 2. 剥离 Unicode 组合附加符号（如 ͓̽ ͏ 等）
+    .replace(/[̀-ͯ᷀-᷿⃐-⃿]/g, "")
+    // 3. 全角转半角
+    .replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    // 4. 去除末尾随机短尾缀（1-5 位字母数字，前有空白）
+    .replace(/\s+[a-z0-9]{1,5}$/i, "")
+    // 以下保留原有逻辑
     .toLowerCase()
     .replace(/\s+/g, "")
-    .replace(/[，。！？、,.!?:;'"""''（）()\[\]【】<>]/g, "");
+    .replace(/[，。！？、,.!?:;'"“”‘’（）()\[\]【】<>]/g, "");
 }
 
 function makeNgrams(str, n) {
@@ -241,6 +250,10 @@ function countMatches(str, re) {
 
 function compactRiskText(str) {
   return (str || "")
+    // 1. 去除零宽字符、不可见格式字符
+    .replace(/[​-‏‪-‮⁠-⁯﻿­͏]/g, "")
+    // 2. 剥离 Unicode 组合附加符号
+    .replace(/[̀-ͯ᷀-᷿⃐-⃿]/g, "")
     .toLowerCase()
     .replace(/[\s\u3000]+/g, "")
     .replace(/[，。！？、,.!?:;'""'""''（）()\[\]【】<>《》~`|\\/]/g, "");
