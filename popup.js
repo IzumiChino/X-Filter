@@ -17,6 +17,12 @@ const DEFAULTS = {
   heuristicChannel: true,
   heuristicThresholdReply: 0.40,
   heuristicThresholdTimeline: 0.70,
+  softBaitChannel: true,
+  softBaitThresholdReply: 0.62,
+  softBaitThresholdTimeline: 0.88,
+  lowInfoChannel: true,
+  lowInfoThresholdReply: 0.70,
+  lowInfoThresholdTimeline: 0.92,
   mlEnabled: true,
   mlMinSamples: 8,
   mlThresholdReply: 0.55,
@@ -147,7 +153,7 @@ async function saveSyncSettings() {
   if (defaultUrl) await chrome.storage.local.set({ xls_default_rules_url: defaultUrl });
 }
 
-const DEFAULT_RULES_URL = "https://raw.githubusercontent.com/acnekot/X-Filter/main/rules.json";
+const DEFAULT_RULES_URL = chrome.runtime.getURL("rules.json");
 
 async function doLoadDefaultRules() {
   let url = document.getElementById("sync-default-url").value.trim();

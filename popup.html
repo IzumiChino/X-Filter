@@ -6,7 +6,7 @@
 </head>
 <body>
   <div class="header">
-    <span>X-Filter <span class="version">v1.0.1</span></span>
+    <span>X-Filter <span class="version">v1.0.2</span></span>
   </div>
 
   <div class="body">
@@ -27,6 +27,14 @@
       <div class="option">
         <span class="option-label">启发式通道（零训练自动拦截）</span>
         <div class="toggle on" id="toggle-heuristicChannel" data-key="heuristicChannel"></div>
+      </div>
+      <div class="option">
+        <span class="option-label">软诱导组合通道</span>
+        <div class="toggle on" id="toggle-softBaitChannel" data-key="softBaitChannel"></div>
+      </div>
+      <div class="option">
+        <span class="option-label">低信息短回复组合通道</span>
+        <div class="toggle on" id="toggle-lowInfoChannel" data-key="lowInfoChannel"></div>
       </div>
       <div class="option">
         <span class="option-label">关注免屏蔽</span>
@@ -67,6 +75,26 @@
       <div class="option">
         <span class="option-label">时间线阈值</span>
         <input type="number" class="num-input" id="num-heuristicThresholdTimeline" data-key="heuristicThresholdTimeline" min="0.3" max="0.95" step="0.05">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">软诱导 / 低信息</div>
+      <div class="option">
+        <span class="option-label">软诱导回复区阈值</span>
+        <input type="number" class="num-input" id="num-softBaitThresholdReply" data-key="softBaitThresholdReply" min="0.35" max="0.95" step="0.05">
+      </div>
+      <div class="option">
+        <span class="option-label">软诱导时间线阈值</span>
+        <input type="number" class="num-input" id="num-softBaitThresholdTimeline" data-key="softBaitThresholdTimeline" min="0.50" max="0.98" step="0.05">
+      </div>
+      <div class="option">
+        <span class="option-label">低信息回复区阈值</span>
+        <input type="number" class="num-input" id="num-lowInfoThresholdReply" data-key="lowInfoThresholdReply" min="0.45" max="0.98" step="0.05">
+      </div>
+      <div class="option">
+        <span class="option-label">低信息时间线阈值</span>
+        <input type="number" class="num-input" id="num-lowInfoThresholdTimeline" data-key="lowInfoThresholdTimeline" min="0.60" max="0.99" step="0.05">
       </div>
     </div>
 
@@ -163,7 +191,7 @@
     <div class="section section-collapse" id="about-section">
       <div class="section-title collapse-trigger" id="about-trigger">关于 ▾</div>
       <div class="collapse-body" id="about-body" style="display:none">
-        <div class="about-text">X-Filter v1.0.1 — 纯本地自学习 X/Twitter 垃圾过滤器</div>
+        <div class="about-text">X-Filter v1.0.2 — 纯本地自学习 X/Twitter 垃圾过滤器</div>
         <div class="about-links">
           <a class="about-link" href="https://github.com/acnekot/X-Filter" target="_blank">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:text-bottom"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -177,7 +205,7 @@
     </div>
   </div>
 
-  <div class="footer">X-Filter v1.0.1 — <span id="sync-info">纯本地自学习过滤器</span></div>
+  <div class="footer">X-Filter v1.0.2 — <span id="sync-info">纯本地自学习过滤器</span></div>
 
   <script src="popup.js"></script>
 </body>
